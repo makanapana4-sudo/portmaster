@@ -1,5 +1,9 @@
 name: Rust Core
 
+concurrency:
+  group: rust-core-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
