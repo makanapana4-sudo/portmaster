@@ -264,7 +264,12 @@ impl DnsResolver {
     ) -> Result<Option<DnsResolveResult>, DnsResolverError> {
         let mut cache = self.cache.lock().map_err(|_| DnsResolverError::CacheUnavailable)?;
         match cache.lookup(key, current_unix_seconds(), false, false) {
-            Some(lookup) if lookup.kind == DnsCacheLookupKind::Fresh => {
+            Some(lookup)
+                if matches!(
+                    lookup.kind,
+                    DnsCacheLookupKind::Fresh | DnsCacheLookupKind::RefreshSoon
+                ) =>
+            {
                 Ok(Some(cached_result(lookup.entry)?))
             }
             _ => Ok(None),
@@ -425,6 +430,52 @@ mod tests {
         assert_eq!(first.source, DnsResolveSource::Upstream);
         assert_eq!(second.source, DnsResolveSource::Upstream);
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn serves_expired_success_as_fallback_when_upstream_times_out() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let remote = server.local_addr().unwrap();
+        let timeout_config = DnsUpstreamConfig {
+            timeout: Duration::from_millis(40),
+            attempts: 1,
+            max_response_size: 4096,
+            prefer_tcp: false,
+            allow_tcp_fallback: true,
+        };
+        let upstream = DnsUpstreamClient::new(remote, timeout_config).unwrap();
+        let now = current_unix_seconds();
+        let query_packet = query();
+        let old_response = response_for(&query_packet);
+
+        let mut cache = DnsCache::new(16, DnsCachePolicy::default()).unwrap();
+        assert!(cache
+            .insert_dns_response_for_query(
+                &query_packet,
+                old_response,
+                false,
+                true,
+                false,
+                now.saturating_sub(120),
+            )
+            .unwrap());
+
+        let coalescer =
+            DnsRequestCoalescer::new(16, Duration::from_secs(1)).unwrap();
+        let resolver = DnsResolver::new(upstream, cache, coalescer);
+
+        let result = resolver
+            .resolve(
+                &query_packet,
+                DnsResolveOptions {
+                    allow_stale_on_error: true,
+                    ..DnsResolveOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.source, DnsResolveSource::StaleFallback);
+        assert_eq!(result.metadata.minimum_record_ttl_secs, Some(17));
     }
 
     #[test]
