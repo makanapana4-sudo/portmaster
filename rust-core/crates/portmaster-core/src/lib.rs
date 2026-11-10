@@ -11,6 +11,7 @@ pub mod dns_cache;
 pub mod dns_coalescer;
 pub mod dns_wire;
 pub mod dns_query;
+pub mod dns_resolver;
 pub mod dns_upstream;
 pub mod driver_info;
 pub mod driver_protocol;
@@ -31,6 +32,7 @@ pub use dns_cache::{
     DNS_RCODE_REFUSED, DNS_RCODE_SUCCESS,
 };
 pub use dns_query::{build_dns_query, DnsQueryOptions};
+pub use dns_resolver::{DnsResolveOptions, DnsResolveResult, DnsResolveSource, DnsResolver, DnsResolverError};
 pub use dns_upstream::{DnsUpstreamClient, DnsUpstreamConfig, DnsUpstreamError};
 pub use dns_wire::{
     parse_dns_message, rewrite_resource_record_ttls, validate_dns_response, DnsMessageMetadata,

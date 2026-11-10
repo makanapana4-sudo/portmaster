@@ -1,6 +1,6 @@
 use crate::{
     dns_cache::{
-        DnsCache, DnsCacheEntry, DnsCacheLookupKind, DnsWireCacheError,
+        DnsCache, DnsCacheConfigError, DnsCacheEntry, DnsCacheLookupKind, DnsWireCacheError,
     },
     dns_coalescer::{DnsRequestCoalescer, DnsRequestStart},
     dns_upstream::{DnsUpstreamClient, DnsUpstreamError},
@@ -52,6 +52,7 @@ pub struct DnsResolveResult {
 pub enum DnsResolverError {
     InvalidQuery,
     CacheUnavailable,
+    CacheKey(DnsCacheConfigError),
     Upstream(DnsUpstreamError),
     Wire(DnsWireError),
     Cache(DnsWireCacheError),
@@ -63,6 +64,7 @@ impl std::fmt::Display for DnsResolverError {
         match self {
             Self::InvalidQuery => formatter.write_str("DNS request must be a single-question query"),
             Self::CacheUnavailable => formatter.write_str("DNS response cache is unavailable"),
+            Self::CacheKey(error) => write!(formatter, "invalid DNS question key: {error}"),
             Self::Upstream(error) => write!(formatter, "DNS upstream failed: {error}"),
             Self::Wire(error) => write!(formatter, "DNS message is invalid: {error}"),
             Self::Cache(error) => write!(formatter, "DNS response could not be cached: {error}"),
@@ -77,6 +79,7 @@ impl std::error::Error for DnsResolverError {
             Self::Upstream(error) => Some(error),
             Self::Wire(error) => Some(error),
             Self::Cache(error) => Some(error),
+            Self::CacheKey(error) => Some(error),
             _ => None,
         }
     }
@@ -91,6 +94,12 @@ impl From<DnsUpstreamError> for DnsResolverError {
 impl From<DnsWireError> for DnsResolverError {
     fn from(error: DnsWireError) -> Self {
         Self::Wire(error)
+    }
+}
+
+impl From<DnsCacheConfigError> for DnsResolverError {
+    fn from(error: DnsCacheConfigError) -> Self {
+        Self::CacheKey(error)
     }
 }
 
@@ -138,10 +147,7 @@ impl DnsResolver {
         options: DnsResolveOptions,
     ) -> Result<DnsResolveResult, DnsResolverError> {
         let query = parse_dns_message(query_packet)?;
-        if query.is_response()
-            || query.is_truncated()
-            || query.question_count != 1
-        {
+        if query.is_response() || query.is_truncated() || query.question_count != 1 {
             return Err(DnsResolverError::InvalidQuery);
         }
 
@@ -154,8 +160,6 @@ impl DnsResolver {
         }
         let key = question.cache_key()?;
         let cacheable = !options.no_caching && !options.is_connectivity_domain;
-        let now_unix = current_unix_seconds();
-
         let stale_fallback = if cacheable {
             let mut cache = self.cache.lock().map_err(|_| DnsResolverError::CacheUnavailable)?;
             match cache.lookup(&key, now_unix, true, false) {
@@ -176,7 +180,7 @@ impl DnsResolver {
         };
 
         if !cacheable {
-            return self.fetch_uncached(query_packet, options);
+            return self.fetch_uncached(query_packet);
         }
 
         loop {
@@ -201,10 +205,6 @@ impl DnsResolver {
                             }
 
                             drop(guard);
-                            if let Some(result) = self.lookup_fresh(&key)? {
-                                return Ok(result);
-                            }
-
                             return prepare_network_response(
                                 response,
                                 DnsResolveSource::Upstream,
@@ -241,7 +241,6 @@ impl DnsResolver {
     fn fetch_uncached(
         &self,
         query_packet: &[u8],
-        options: DnsResolveOptions,
     ) -> Result<DnsResolveResult, DnsResolverError> {
         let response = self.upstream.exchange(query_packet)?;
         let metadata = parse_dns_message(&response)?;
@@ -251,7 +250,6 @@ impl DnsResolver {
         }
 
         let client_ttl = self.client_ttl()?;
-        let _ = options;
         prepare_network_response(
             response,
             DnsResolveSource::Upstream,

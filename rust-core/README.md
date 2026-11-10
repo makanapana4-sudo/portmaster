@@ -9,6 +9,7 @@ The workspace now contains reusable building blocks:
 - a bounded single-flight DNS request coordinator with cancellation, timeout recovery and safe leader replacement;
 - a DNS wire parser and query builder, including compressed-name validation, EDNS support, minimum TTL extraction, upstream response matching and safe TTL rewriting;
 - synchronous DNS-over-UDP upstream exchanges with retries and automatic DNS-over-TCP fallback, including transaction/question validation;
+- an integrated synchronous DNS resolver joining query validation, cache lookup/insertion, duplicate-request coalescing, upstream fetches and stale fallback;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
 - safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and a generic transport adapter for the existing Windows driver protocol;
@@ -47,6 +48,7 @@ rust-core/
         dns_coalescer.rs
         dns_wire.rs
         dns_query.rs
+        dns_resolver.rs
         dns_upstream.rs
         driver_info.rs
         driver_protocol.rs
