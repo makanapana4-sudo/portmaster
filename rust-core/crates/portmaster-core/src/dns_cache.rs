@@ -1,6 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-};
+use std::collections::{HashMap, VecDeque};
 
 const MAX_CACHE_CAPACITY: usize = 1_000_000;
 
@@ -613,13 +611,13 @@ mod tests {
             1_000
         ));
 
-        let lookup = cache.lookup(&question, 1_060, false, false).unwrap();
+        let lookup = cache.lookup(&question, 1_090, false, false).unwrap();
         assert_eq!(lookup.kind, DnsCacheLookupKind::RefreshSoon);
         assert_eq!(lookup.entry.payload(), &[1, 2, 3]);
         assert_eq!(lookup.entry.client_record_ttl_secs(), 17);
 
         assert_eq!(
-            cache.lookup(&question, 1_061, false, false).unwrap().kind,
+            cache.lookup(&question, 1_089, false, false).unwrap().kind,
             DnsCacheLookupKind::Fresh
         );
     }
