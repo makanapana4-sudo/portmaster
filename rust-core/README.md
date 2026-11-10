@@ -7,7 +7,7 @@ The workspace now contains reusable building blocks:
 - validated core resource-limit configuration;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
-- safe framing and command encoding for the existing Windows driver protocol;
+- safe framing, typed decoding, and command encoding for the existing Windows driver protocol;
 - shared error types.
 
 These components are not yet connected to the running Portmaster service. The existing Go implementation remains authoritative and must not be removed or bypassed until migrated features demonstrate behavior parity, security equivalence, and measured performance improvements.
@@ -39,6 +39,7 @@ rust-core/
         cache.rs
         config.rs
         connection.rs
+        driver_info.rs
         driver_protocol.rs
         error.rs
         event_queue.rs
@@ -50,7 +51,7 @@ rust-core/
 - Validate configuration and resource limits before starting work.
 - Keep unsafe Rust forbidden in this platform-independent crate.
 - Bound queues and caches; define backpressure behavior instead of silently dropping events.
-- Parse driver frames with size checks and borrow payloads instead of copying them.
+- Parse driver frames with size checks, decode all current event kinds, and borrow packet payloads and bandwidth records instead of copying them.
 - Encode driver commands into reusable buffers to avoid repeated allocations.
 - Avoid unnecessary dependencies and background threads.
 - Preserve the existing WFP driver protocol until compatibility is proven.
@@ -79,7 +80,7 @@ No product-level speed or memory improvement is claimed yet: these Rust componen
 ## Migration order
 
 1. Map existing Go configuration and connection-lifecycle behavior.
-2. Confirm command and info-frame parity against the Go-side and driver protocol fixtures.
+2. Confirm command and typed info-message parity against the Go-side and driver protocol fixtures.
 3. Connect the Rust event pipeline to the existing driver through a test-only adapter.
 4. Integrate bounded event processing with explicit backpressure and recovery.
 5. Migrate selected service features behind an opt-in development switch.
