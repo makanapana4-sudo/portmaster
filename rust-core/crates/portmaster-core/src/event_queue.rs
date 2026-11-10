@@ -1,6 +1,4 @@
-use std::sync::mpsc::{
-    sync_channel, Receiver, SyncSender, TryRecvError, TrySendError,
-};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 const MAX_CAPACITY: usize = 1_000_000;
 
@@ -40,6 +38,7 @@ pub fn bounded_event_queue<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::{TryRecvError, TrySendError};
 
     #[test]
     fn rejects_zero_capacity() {
