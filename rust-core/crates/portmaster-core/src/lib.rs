@@ -15,8 +15,7 @@ pub use cache::{BoundedTtlCache, CacheConfigError};
 pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
 pub use driver_protocol::{
-    parse_info_frame, DriverCommand, InfoFrame, InfoKind, ProtocolError,
-    DEFAULT_MAX_INFO_PAYLOAD,
+    parse_info_frame, DriverCommand, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
 };
 pub use error::CoreError;
 pub use event_queue::{bounded_event_queue, QueueConfigError};
