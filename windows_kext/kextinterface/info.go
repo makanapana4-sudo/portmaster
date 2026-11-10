@@ -150,19 +150,16 @@ type readHelper struct {
 }
 
 func newReadHelper(reader io.Reader) (*readHelper, error) {
-	helper := &readHelper{reader: reader}
-
-	err := binary.Read(reader, binary.LittleEndian, &helper.infoType)
-	if err != nil {
+	var header [5]byte
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(reader, binary.LittleEndian, &helper.commandSize)
-	if err != nil {
-		return nil, err
-	}
-
-	return helper, nil
+	return &readHelper{
+		infoType:    header[0],
+		commandSize: binary.LittleEndian.Uint32(header[1:]),
+		reader:      reader,
+	}, nil
 }
 
 func (r *readHelper) remaining() (uint64, error) {
@@ -172,21 +169,148 @@ func (r *readHelper) remaining() (uint64, error) {
 	return uint64(r.commandSize) - uint64(r.readSize), nil
 }
 
-func (r *readHelper) ReadData(data any) error {
-	size := binary.Size(data)
+// ReadFixed reads a fixed-size field without reflection or temporary buffers.
+func (r *readHelper) ReadFixed(output []byte) error {
 	remaining, err := r.remaining()
 	if err != nil {
 		return err
 	}
-	if size < 0 || uint64(size) > remaining {
+	if uint64(len(output)) > remaining {
 		return ErrUnexpectedInfoSize
 	}
-
-	if err := binary.Read(r, binary.LittleEndian, data); err != nil {
+	if len(output) == 0 {
+		return nil
+	}
+	if _, err := io.ReadFull(r, output); err != nil {
 		return errors.Join(ErrUnexpectedReadError, err)
 	}
-
 	return nil
+}
+
+func (r *readHelper) ReadUint8() (uint8, error) {
+	var raw [1]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return 0, err
+	}
+	return raw[0], nil
+}
+
+func (r *readHelper) ReadUint32() (uint32, error) {
+	var raw [4]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(raw[:]), nil
+}
+
+func (r *readHelper) readConnectionV4() (connectionV4Internal, error) {
+	var raw [31]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return connectionV4Internal{}, err
+	}
+
+	value := connectionV4Internal{
+		ID:           binary.LittleEndian.Uint64(raw[0:8]),
+		ProcessID:    binary.LittleEndian.Uint64(raw[8:16]),
+		Direction:    raw[16],
+		Protocol:     raw[17],
+		LocalPort:    binary.LittleEndian.Uint16(raw[26:28]),
+		RemotePort:   binary.LittleEndian.Uint16(raw[28:30]),
+		PayloadLayer: raw[30],
+	}
+	copy(value.LocalIP[:], raw[18:22])
+	copy(value.RemoteIP[:], raw[22:26])
+	return value, nil
+}
+
+func (r *readHelper) readConnectionV6() (connectionV6Internal, error) {
+	var raw [55]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return connectionV6Internal{}, err
+	}
+
+	value := connectionV6Internal{
+		ID:           binary.LittleEndian.Uint64(raw[0:8]),
+		ProcessID:    binary.LittleEndian.Uint64(raw[8:16]),
+		Direction:    raw[16],
+		Protocol:     raw[17],
+		LocalPort:    binary.LittleEndian.Uint16(raw[50:52]),
+		RemotePort:   binary.LittleEndian.Uint16(raw[52:54]),
+		PayloadLayer: raw[54],
+	}
+	copy(value.LocalIP[:], raw[18:34])
+	copy(value.RemoteIP[:], raw[34:50])
+	return value, nil
+}
+
+func (r *readHelper) readConnectionEndV4() (ConnectionEndV4, error) {
+	var raw [22]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return ConnectionEndV4{}, err
+	}
+
+	value := ConnectionEndV4{
+		ProcessID:  binary.LittleEndian.Uint64(raw[0:8]),
+		Direction:  raw[8],
+		Protocol:   raw[9],
+		LocalPort:  binary.LittleEndian.Uint16(raw[18:20]),
+		RemotePort: binary.LittleEndian.Uint16(raw[20:22]),
+	}
+	copy(value.LocalIP[:], raw[10:14])
+	copy(value.RemoteIP[:], raw[14:18])
+	return value, nil
+}
+
+func (r *readHelper) readConnectionEndV6() (ConnectionEndV6, error) {
+	var raw [46]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return ConnectionEndV6{}, err
+	}
+
+	value := ConnectionEndV6{
+		ProcessID:  binary.LittleEndian.Uint64(raw[0:8]),
+		Direction:  raw[8],
+		Protocol:   raw[9],
+		LocalPort:  binary.LittleEndian.Uint16(raw[42:44]),
+		RemotePort: binary.LittleEndian.Uint16(raw[44:46]),
+	}
+	copy(value.LocalIP[:], raw[10:26])
+	copy(value.RemoteIP[:], raw[26:42])
+	return value, nil
+}
+
+func (r *readHelper) readBandwidthValueV4() (BandwidthValueV4, error) {
+	var raw [bandwidthValueV4Size]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return BandwidthValueV4{}, err
+	}
+
+	value := BandwidthValueV4{
+		LocalPort:        binary.LittleEndian.Uint16(raw[4:6]),
+		RemotePort:       binary.LittleEndian.Uint16(raw[10:12]),
+		TransmittedBytes: binary.LittleEndian.Uint64(raw[12:20]),
+		ReceivedBytes:    binary.LittleEndian.Uint64(raw[20:28]),
+	}
+	copy(value.LocalIP[:], raw[0:4])
+	copy(value.RemoteIP[:], raw[6:10])
+	return value, nil
+}
+
+func (r *readHelper) readBandwidthValueV6() (BandwidthValueV6, error) {
+	var raw [bandwidthValueV6Size]byte
+	if err := r.ReadFixed(raw[:]); err != nil {
+		return BandwidthValueV6{}, err
+	}
+
+	value := BandwidthValueV6{
+		LocalPort:        binary.LittleEndian.Uint16(raw[16:18]),
+		RemotePort:       binary.LittleEndian.Uint16(raw[34:36]),
+		TransmittedBytes: binary.LittleEndian.Uint64(raw[36:44]),
+		ReceivedBytes:    binary.LittleEndian.Uint64(raw[44:52]),
+	}
+	copy(value.LocalIP[:], raw[0:16])
+	copy(value.RemoteIP[:], raw[18:34])
+	return value, nil
 }
 
 func (r *readHelper) validateArrayCount(count uint32, elementSize uint32) error {
@@ -222,8 +346,8 @@ func (r *readHelper) ReadBytes(size uint32) ([]byte, error) {
 	}
 
 	data := make([]byte, int(size))
-	if _, err := io.ReadFull(r, data); err != nil {
-		return nil, errors.Join(ErrUnexpectedReadError, err)
+	if err := r.ReadFixed(data); err != nil {
+		return nil, err
 	}
 
 	return data, nil
@@ -275,7 +399,7 @@ func RecvInfo(reader io.Reader) (*Info, error) {
 		if payloadSize > 0 {
 			newInfo.Payload, err = helper.ReadBytes(payloadSize)
 			if err != nil {
-				return nil, errors.Join(parseError, err, fmt.Errorf("payload"))
+				return nil, fmt.Errorf("failed to parse InfoConnectionIpv4 payload: %w", err)
 			}
 		}
 		return &Info{ConnectionV4: &newInfo}, nil
@@ -294,7 +418,7 @@ func RecvInfo(reader io.Reader) (*Info, error) {
 		if payloadSize > 0 {
 			newInfo.Payload, err = helper.ReadBytes(payloadSize)
 			if err != nil {
-				return nil, errors.Join(parseError, err)
+				return nil, fmt.Errorf("failed to parse InfoConnectionIpv6 payload: %w", err)
 			}
 		}
 		return &Info{ConnectionV6: &newInfo}, nil
