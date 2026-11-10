@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/portmaster-core"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0"
+rust-version = "1.75"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
