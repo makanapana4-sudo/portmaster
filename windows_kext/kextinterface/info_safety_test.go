@@ -172,3 +172,51 @@ func TestRecvInfoDecodesFixedConnectionFields(t *testing.T) {
 		t.Fatalf("unexpected IPv6 payload: %v", v6Info.ConnectionV6.Payload)
 	}
 }
+
+func BenchmarkRecvInfoConnectionV4(b *testing.B) {
+	payload := make([]byte, 31+4)
+	binary.LittleEndian.PutUint64(payload[0:8], 1)
+	binary.LittleEndian.PutUint64(payload[8:16], 2)
+	payload[17] = 6
+	binary.LittleEndian.PutUint16(payload[26:28], 1234)
+	binary.LittleEndian.PutUint16(payload[28:30], 443)
+	frame := makeInfoFrame(InfoConnectionIpv4, payload)
+	reader := bytes.NewReader(frame)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame)
+		if _, err := RecvInfo(reader); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRecvInfoBandwidthV4(b *testing.B) {
+	const recordCount = 128
+	payload := make([]byte, 5+recordCount*bandwidthValueV4Size)
+	payload[0] = 6
+	binary.LittleEndian.PutUint32(payload[1:5], recordCount)
+	for i := 0; i < recordCount; i++ {
+		offset := 5 + i*bandwidthValueV4Size
+		binary.LittleEndian.PutUint16(payload[offset+4:offset+6], uint16(1000+i))
+		binary.LittleEndian.PutUint16(payload[offset+10:offset+12], 443)
+		binary.LittleEndian.PutUint64(payload[offset+12:offset+20], uint64(i))
+		binary.LittleEndian.PutUint64(payload[offset+20:offset+28], uint64(i*2))
+	}
+
+	frame := makeInfoFrame(InfoBandwidthStatsV4, payload)
+	reader := bytes.NewReader(frame)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame)
+		if _, err := RecvInfo(reader); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
