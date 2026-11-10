@@ -160,6 +160,7 @@ impl DnsResolver {
         }
         let key = question.cache_key()?;
         let cacheable = !options.no_caching && !options.is_connectivity_domain;
+        let now_unix = current_unix_seconds();
         let stale_fallback = if cacheable {
             let mut cache = self.cache.lock().map_err(|_| DnsResolverError::CacheUnavailable)?;
             match cache.lookup(&key, now_unix, true, false) {
