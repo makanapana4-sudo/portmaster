@@ -222,12 +222,29 @@ impl DnsUpstreamClient {
     }
 
     fn exchange_tcp(&self, query: &[u8]) -> Result<Vec<u8>, DnsUpstreamError> {
-        let query_length =
-            u16::try_from(query.len()).map_err(|_| DnsUpstreamError::QueryTooLarge)?;
         let mut stream = TcpStream::connect_timeout(&self.remote, self.config.timeout)?;
         stream.set_read_timeout(Some(self.config.timeout))?;
         stream.set_write_timeout(Some(self.config.timeout))?;
+        self.exchange_over_tcp_stream(query, &mut stream)
+    }
 
+    /// Performs one DNS-over-TCP exchange on an existing stream.
+    ///
+    /// The stream can be a plain TCP connection or an authenticated TLS
+    /// stream supplied by a future DNS-over-TLS integration. The caller owns
+    /// connection setup, peer authentication and stream timeouts.
+    pub fn exchange_over_tcp_stream<S: Read + Write>(
+        &self,
+        query: &[u8],
+        stream: &mut S,
+    ) -> Result<Vec<u8>, DnsUpstreamError> {
+        let query_metadata = parse_dns_message(query)?;
+        if query_metadata.is_response() || query_metadata.question_count != 1 {
+            return Err(DnsUpstreamError::InvalidQuery);
+        }
+
+        let query_length =
+            u16::try_from(query.len()).map_err(|_| DnsUpstreamError::QueryTooLarge)?;
         stream.write_all(&query_length.to_be_bytes())?;
         stream.write_all(query)?;
 
@@ -254,8 +271,7 @@ impl DnsUpstreamClient {
         }
 
         Ok(response)
-    }
-}
+    }}
 
 fn is_truncated_datagram(response: &[u8], expected_id: u16) -> bool {
     if response.len() < 4 {
@@ -386,6 +402,57 @@ mod tests {
         let response = client.exchange(&query).unwrap();
         validate_dns_response(&query, &response).unwrap();
         server_thread.join().unwrap();
+    }
+
+    struct BufferedStream {
+        input: Cursor<Vec<u8>>,
+        output: Vec<u8>,
+    }
+
+    impl Read for BufferedStream {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            self.input.read(output)
+        }
+    }
+
+    impl Write for BufferedStream {
+        fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+            self.output.extend_from_slice(input);
+            Ok(input.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn tcp_exchange_can_use_an_existing_stream() {
+        let query_packet = query();
+        let response = response_for(&query_packet, false);
+        let mut input = Vec::new();
+        input.extend_from_slice(&(response.len() as u16).to_be_bytes());
+        input.extend_from_slice(&response);
+        let mut stream = BufferedStream {
+            input: Cursor::new(input),
+            output: Vec::new(),
+        };
+        let client = DnsUpstreamClient::new(
+            "127.0.0.1:53".parse().unwrap(),
+            test_config(),
+        )
+        .unwrap();
+
+        let received = client
+            .exchange_over_tcp_stream(&query_packet, &mut stream)
+            .unwrap();
+
+        assert_eq!(received, response);
+        assert_eq!(
+            &stream.output[..2],
+            &(query_packet.len() as u16).to_be_bytes()
+        );
+        assert_eq!(&stream.output[2..], query_packet.as_slice());
     }
 
     #[test]
