@@ -17,26 +17,26 @@ pub enum InfoKind {
     BandwidthStatsV6 = 6,
 }
 
+const INFO_LOG_LINE: u8 = DriverInfoType::LogLine as u8;
+const INFO_CONNECTION_IPV4: u8 = DriverInfoType::ConnectionIpv4 as u8;
+const INFO_CONNECTION_IPV6: u8 = DriverInfoType::ConnectionIpv6 as u8;
+const INFO_CONNECTION_END_V4: u8 = DriverInfoType::ConnectionEndEventV4 as u8;
+const INFO_CONNECTION_END_V6: u8 = DriverInfoType::ConnectionEndEventV6 as u8;
+const INFO_BANDWIDTH_STATS_V4: u8 = DriverInfoType::BandwidthStatsV4 as u8;
+const INFO_BANDWIDTH_STATS_V6: u8 = DriverInfoType::BandwidthStatsV6 as u8;
+
 impl TryFrom<u8> for InfoKind {
     type Error = ProtocolError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            value if value == DriverInfoType::LogLine as u8 => Ok(Self::LogLine),
-            value if value == DriverInfoType::ConnectionIpv4 as u8 => Ok(Self::ConnectionIpv4),
-            value if value == DriverInfoType::ConnectionIpv6 as u8 => Ok(Self::ConnectionIpv6),
-            value if value == DriverInfoType::ConnectionEndEventV4 as u8 => {
-                Ok(Self::ConnectionEndV4)
-            }
-            value if value == DriverInfoType::ConnectionEndEventV6 as u8 => {
-                Ok(Self::ConnectionEndV6)
-            }
-            value if value == DriverInfoType::BandwidthStatsV4 as u8 => {
-                Ok(Self::BandwidthStatsV4)
-            }
-            value if value == DriverInfoType::BandwidthStatsV6 as u8 => {
-                Ok(Self::BandwidthStatsV6)
-            }
+            INFO_LOG_LINE => Ok(Self::LogLine),
+            INFO_CONNECTION_IPV4 => Ok(Self::ConnectionIpv4),
+            INFO_CONNECTION_IPV6 => Ok(Self::ConnectionIpv6),
+            INFO_CONNECTION_END_V4 => Ok(Self::ConnectionEndV4),
+            INFO_CONNECTION_END_V6 => Ok(Self::ConnectionEndV6),
+            INFO_BANDWIDTH_STATS_V4 => Ok(Self::BandwidthStatsV4),
+            INFO_BANDWIDTH_STATS_V6 => Ok(Self::BandwidthStatsV6),
             other => Err(ProtocolError::UnknownInfoType(other)),
         }
     }
