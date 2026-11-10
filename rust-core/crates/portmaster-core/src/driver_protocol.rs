@@ -48,7 +48,10 @@ impl std::fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TruncatedHeader => formatter.write_str("driver info header is incomplete"),
-            Self::TruncatedPayload { expected, available } => write!(
+            Self::TruncatedPayload {
+                expected,
+                available,
+            } => write!(
                 formatter,
                 "driver info payload is truncated: expected {expected} bytes, got {available}"
             ),
@@ -287,7 +290,7 @@ mod tests {
     fn encodes_verdict_using_driver_wire_layout() {
         let command = DriverCommand::Verdict { id: 1, verdict: 2 };
         assert_eq!(command.encoded_len(), 10);
-        assert_eq!(command.encode(), [1, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
+        assert_eq!(command.encode().as_slice(), &[1, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
     }
 
     #[test]
@@ -304,8 +307,8 @@ mod tests {
 
         assert_eq!(bytes.len(), 15);
         assert_eq!(bytes[0], CommandType::UpdateV4 as u8);
-        assert_eq!(&bytes[7..9], &[0x34, 0x12]);
-        assert_eq!(&bytes[13..15], &[0xbb, 0x01]);
+        assert_eq!(&bytes[6..8], &[0x34, 0x12]);
+        assert_eq!(&bytes[12..14], &[0xbb, 0x01]);
     }
 
     #[test]
