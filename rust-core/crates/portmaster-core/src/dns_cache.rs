@@ -15,6 +15,9 @@ pub enum DnsCacheConfigError {
     CapacityTooLarge,
     ZeroTtl,
     MinimumTtlExceedsMaximum,
+    EmptyName,
+    ZeroByteBudget,
+    EntryBudgetExceedsTotal,
 }
 
 impl std::fmt::Display for DnsCacheConfigError {
@@ -27,6 +30,11 @@ impl std::fmt::Display for DnsCacheConfigError {
             Self::ZeroTtl => formatter.write_str("DNS cache TTL values must be greater than zero"),
             Self::MinimumTtlExceedsMaximum => {
                 formatter.write_str("DNS cache minimum TTL cannot exceed maximum TTL")
+            }
+            Self::EmptyName => formatter.write_str("DNS query name cannot be empty"),
+            Self::ZeroByteBudget => formatter.write_str("DNS cache byte budgets must be greater than zero"),
+            Self::EntryBudgetExceedsTotal => {
+                formatter.write_str("DNS cache entry limit cannot exceed total byte budget")
             }
         }
     }
@@ -143,17 +151,14 @@ pub struct DnsQueryKey {
 impl DnsQueryKey {
     pub fn new(name: &str, record_type: u16) -> Result<Self, DnsCacheConfigError> {
         if name.is_empty() {
-            return Err(DnsCacheConfigError::ZeroCapacity);
+            return Err(DnsCacheConfigError::EmptyName);
         }
 
-        let normalized = if name == "." {
-            ".".to_owned()
+        let lower = name.to_ascii_lowercase();
+        let normalized = if lower.ends_with('.') {
+            lower
         } else {
-            format!("{}.", name.trim_end_matches('.').to_ascii_lowercase())
-        };
-
-        if normalized == "." && name != "." {
-            return Err(DnsCacheConfigError::ZeroCapacity);
+            format!("{lower}.")
         }
 
         Ok(Self {
@@ -245,6 +250,9 @@ struct StoredEntry {
 /// response without first reaching the configured limit.
 pub struct DnsCache {
     capacity: usize,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    total_payload_bytes: usize,
     policy: DnsCachePolicy,
     entries: HashMap<DnsQueryKey, StoredEntry>,
     insertion_order: VecDeque<(DnsQueryKey, u64)>,
@@ -256,16 +264,35 @@ impl DnsCache {
         capacity: usize,
         policy: DnsCachePolicy,
     ) -> Result<Self, DnsCacheConfigError> {
+        Self::new_with_limits(capacity, 65_535, 32 * 1024 * 1024, policy)
+    }
+
+    /// Creates a DNS cache with explicit per-response and total payload limits.
+    pub fn new_with_limits(
+        capacity: usize,
+        max_entry_bytes: usize,
+        max_total_bytes: usize,
+        policy: DnsCachePolicy,
+    ) -> Result<Self, DnsCacheConfigError> {
         if capacity == 0 {
             return Err(DnsCacheConfigError::ZeroCapacity);
         }
         if capacity > MAX_CACHE_CAPACITY {
             return Err(DnsCacheConfigError::CapacityTooLarge);
         }
+        if max_entry_bytes == 0 || max_total_bytes == 0 {
+            return Err(DnsCacheConfigError::ZeroByteBudget);
+        }
+        if max_entry_bytes > max_total_bytes {
+            return Err(DnsCacheConfigError::EntryBudgetExceedsTotal);
+        }
         policy.validate()?;
 
         Ok(Self {
             capacity,
+            max_entry_bytes,
+            max_total_bytes,
+            total_payload_bytes: 0,
             policy,
             entries: HashMap::new(),
             insertion_order: VecDeque::new(),
@@ -286,10 +313,12 @@ impl DnsCache {
         if no_caching
             || metadata.is_connectivity_domain
             || !DnsCachePolicy::is_cacheable_rcode(metadata.rcode)
+            || payload.len() > self.max_entry_bytes
         {
             return false;
         }
 
+        let payload_size = payload.len();
         let lifetime = self.policy.lifetime_secs(&metadata);
         let entry = DnsCacheEntry {
             key: key.clone(),
@@ -301,9 +330,18 @@ impl DnsCache {
             is_connectivity_domain: metadata.is_connectivity_domain,
         };
 
-        self.entries.remove(&key);
-        if self.entries.len() >= self.capacity {
-            self.evict_oldest();
+        if let Some(previous) = self.entries.remove(&key) {
+            self.total_payload_bytes = self
+                .total_payload_bytes
+                .saturating_sub(previous.entry.payload.len());
+        }
+
+        while self.entries.len() >= self.capacity
+            || self.total_payload_bytes.saturating_add(payload_size) > self.max_total_bytes
+        {
+            if !self.evict_oldest() {
+                return false;
+            }
         }
 
         self.generation = self.generation.wrapping_add(1);
@@ -313,6 +351,7 @@ impl DnsCache {
 
         let generation = self.generation;
         self.entries.insert(key.clone(), StoredEntry { entry, generation });
+        self.total_payload_bytes = self.total_payload_bytes.saturating_add(payload_size);
         self.insertion_order.push_back((key, generation));
         self.compact_order();
         true
@@ -345,8 +384,7 @@ impl DnsCache {
 
             if now_unix >= entry.expires_at_unix {
                 if entry.rcode != DNS_RCODE_SUCCESS {
-                    self.entries.remove(key);
-                    self.compact_order();
+                    self.remove_entry(key);
                     return None;
                 }
 
@@ -373,7 +411,7 @@ impl DnsCache {
     }
 
     pub fn remove(&mut self, key: &DnsQueryKey) -> Option<DnsCacheEntry> {
-        let removed = self.entries.remove(key).map(|stored| stored.entry);
+        let removed = self.remove_entry(key);
         self.compact_order();
         removed
     }
@@ -381,11 +419,27 @@ impl DnsCache {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.insertion_order.clear();
+        self.total_payload_bytes = 0;
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    #[must_use]
+    pub const fn total_payload_bytes(&self) -> usize {
+        self.total_payload_bytes
+    }
+
+    #[must_use]
+    pub const fn max_entry_bytes(&self) -> usize {
+        self.max_entry_bytes
+    }
+
+    #[must_use]
+    pub const fn max_total_bytes(&self) -> usize {
+        self.max_total_bytes
     }
 
     #[must_use]
@@ -403,17 +457,29 @@ impl DnsCache {
         self.policy
     }
 
-    fn evict_oldest(&mut self) {
+    fn evict_oldest(&mut self) -> bool {
         while let Some((key, generation)) = self.insertion_order.pop_front() {
-            if self
+            let is_current = self
                 .entries
                 .get(&key)
-                .is_some_and(|stored| stored.generation == generation)
-            {
-                self.entries.remove(&key);
-                break;
+                .is_some_and(|stored| stored.generation == generation);
+
+            if is_current {
+                self.remove_entry(&key);
+                return true;
             }
         }
+        false
+    }
+
+    fn remove_entry(&mut self, key: &DnsQueryKey) -> Option<DnsCacheEntry> {
+        let removed = self.entries.remove(key).map(|stored| stored.entry);
+        if let Some(entry) = &removed {
+            self.total_payload_bytes = self
+                .total_payload_bytes
+                .saturating_sub(entry.payload.len());
+        }
+        removed
     }
 
     fn compact_order(&mut self) {
@@ -469,7 +535,7 @@ mod tests {
     fn rejects_empty_domain_name() {
         assert_eq!(
             DnsQueryKey::new("", 1).err(),
-            Some(DnsCacheConfigError::ZeroCapacity)
+            Some(DnsCacheConfigError::EmptyName)
         );
     }
 
@@ -617,6 +683,54 @@ mod tests {
             3_000
         ));
         assert!(cache.is_empty());
+    }
+
+
+    #[test]
+    fn enforces_per_entry_and_total_payload_budgets() {
+        let mut cache = DnsCache::new_with_limits(
+            4,
+            5,
+            8,
+            DnsCachePolicy::default(),
+        )
+        .unwrap();
+        let first = key("first.example", 1);
+        let second = key("second.example", 1);
+        let too_large = key("large.example", 1);
+        let response = metadata(DNS_RCODE_SUCCESS, 1, Some(120), false, true);
+
+        assert!(cache.insert(first.clone(), vec![1; 5], response, false, 6_000));
+        assert!(cache.insert(second.clone(), vec![2; 4], response, false, 6_001));
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.total_payload_bytes(), 4);
+        assert!(cache.lookup(&first, 6_001, false, false).is_none());
+        assert!(cache.lookup(&second, 6_001, false, false).is_some());
+
+        assert!(!cache.insert(too_large, vec![3; 6], response, false, 6_002));
+        assert_eq!(cache.total_payload_bytes(), 4);
+    }
+
+    #[test]
+    fn replacing_a_response_updates_the_payload_budget() {
+        let mut cache = DnsCache::new_with_limits(
+            2,
+            8,
+            8,
+            DnsCachePolicy::default(),
+        )
+        .unwrap();
+        let question = key("replace.example", 1);
+        let response = metadata(DNS_RCODE_SUCCESS, 1, Some(120), false, true);
+
+        assert!(cache.insert(question.clone(), vec![1; 6], response, false, 7_000));
+        assert!(cache.insert(question.clone(), vec![2; 3], response, false, 7_001));
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.total_payload_bytes(), 3);
+        assert_eq!(
+            cache.lookup(&question, 7_001, false, false).unwrap().entry.payload(),
+            &[2, 2, 2]
+        );
     }
 
     #[test]
