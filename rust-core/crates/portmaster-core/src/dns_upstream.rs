@@ -166,8 +166,7 @@ impl DnsUpstreamClient {
         socket.set_read_timeout(Some(self.config.timeout))?;
         socket.set_write_timeout(Some(self.config.timeout))?;
 
-        let mut response_buffer = vec![0_u8; self.config.max_response_size];
-        let mut timed_out = false;
+        let mut response_buffer = vec![0_u8; self.config.max_response_size + 1];
 
         for _ in 0..self.config.attempts {
             let written = socket.send(query)?;
@@ -180,6 +179,12 @@ impl DnsUpstreamClient {
 
             match socket.recv(&mut response_buffer) {
                 Ok(length) => {
+                    if length > self.config.max_response_size {
+                        return Err(DnsUpstreamError::ResponseTooLarge {
+                            length,
+                            maximum: self.config.max_response_size,
+                        });
+                    }
                     let response = &response_buffer[..length];
 
                     if is_truncated_datagram(response, query_metadata.id) {
@@ -205,21 +210,15 @@ impl DnsUpstreamClient {
                         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                     ) =>
                 {
-                    timed_out = true;
+                    // Try the next attempt on the same connected socket.
                 }
                 Err(error) => return Err(DnsUpstreamError::Io(error)),
             }
         }
 
-        if timed_out {
-            Err(DnsUpstreamError::Timeout {
-                attempts: self.config.attempts,
-            })
-        } else {
-            Err(DnsUpstreamError::Timeout {
-                attempts: self.config.attempts,
-            })
-        }
+        Err(DnsUpstreamError::Timeout {
+            attempts: self.config.attempts,
+        })
     }
 
     fn exchange_tcp(&self, query: &[u8]) -> Result<Vec<u8>, DnsUpstreamError> {

@@ -48,9 +48,12 @@ pub fn build_dns_query(
     let flags = if options.recursion_desired { 0x0100_u16 } else { 0 };
     output[2..4].copy_from_slice(&flags.to_be_bytes());
     output[4..6].copy_from_slice(&1_u16.to_be_bytes());
-    output[10..12].copy_from_slice(
-        &u16::from(options.udp_payload_size.is_some()).to_be_bytes(),
-    );
+    let additional_count = if options.udp_payload_size.is_some() {
+        1_u16
+    } else {
+        0_u16
+    };
+    output[10..12].copy_from_slice(&additional_count.to_be_bytes());
 
     encode_name(name, &mut output)?;
     output.extend_from_slice(&record_type.to_be_bytes());
