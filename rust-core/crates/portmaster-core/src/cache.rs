@@ -223,8 +223,8 @@ mod tests {
     fn replacing_key_does_not_leave_stale_eviction_record() {
         let mut cache = BoundedTtlCache::new(2, Duration::from_secs(60)).unwrap();
         cache.insert(1, "old");
-        assert_eq!(cache.insert(1, "new"), Some("old"));
         cache.insert(2, "two");
+        assert_eq!(cache.insert(1, "new"), Some("old"));
         cache.insert(3, "three");
         assert_eq!(cache.get(&1), Some(&"new"));
         assert_eq!(cache.get(&2), None);
