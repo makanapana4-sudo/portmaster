@@ -22,20 +22,12 @@ impl Default for ResourceLimits {
 }
 
 /// Minimal configuration for the experimental user-mode core.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CoreConfig {
     pub limits: ResourceLimits,
     pub enable_metrics: bool,
 }
 
-impl Default for CoreConfig {
-    fn default() -> Self {
-        Self {
-            limits: ResourceLimits::default(),
-            enable_metrics: false,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
