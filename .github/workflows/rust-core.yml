@@ -1,0 +1,48 @@
+name: Rust Core
+
+on:
+  push:
+    branches:
+      - development
+      - main
+    paths:
+      - 'rust-core/**'
+      - '.github/workflows/rust-core.yml'
+  pull_request:
+    branches:
+      - development
+      - main
+    paths:
+      - 'rust-core/**'
+      - '.github/workflows/rust-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Check Rust core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust-core/Cargo.toml --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path rust-core/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --manifest-path rust-core/Cargo.toml --workspace
