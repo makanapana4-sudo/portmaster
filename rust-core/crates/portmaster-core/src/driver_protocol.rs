@@ -75,6 +75,25 @@ impl std::fmt::Display for ProtocolError {
 
 impl std::error::Error for ProtocolError {}
 
+/// An output slice was too small to hold a complete driver command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandEncodeError {
+    pub required: usize,
+    pub available: usize,
+}
+
+impl std::fmt::Display for CommandEncodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "command output buffer is too small: need {} bytes, have {}",
+            self.required, self.available
+        )
+    }
+}
+
+impl std::error::Error for CommandEncodeError {}
+
 /// A borrowed view of one driver info frame.
 ///
 /// The wire header is one info-type byte followed by a little-endian 32-bit
@@ -182,20 +201,27 @@ impl DriverCommand {
         }
     }
 
-    /// Encodes the command into a reusable buffer.
+    /// Encodes the command into an existing slice without allocating.
     ///
-    /// The buffer is cleared first. Reserving the exact encoded size allows
-    /// callers to reuse one allocation for repeated driver commands.
-    pub fn encode_into(&self, output: &mut Vec<u8>) {
-        output.clear();
-        output.reserve(self.encoded_len());
+    /// The destination is not modified when it is too small.
+    pub fn encode_to_slice(
+        &self,
+        output: &mut [u8],
+    ) -> Result<usize, CommandEncodeError> {
+        let length = self.encoded_len();
+        if output.len() < length {
+            return Err(CommandEncodeError {
+                required: length,
+                available: output.len(),
+            });
+        }
 
         match self {
-            Self::Shutdown => output.push(CommandType::Shutdown as u8),
+            Self::Shutdown => output[0] = CommandType::Shutdown as u8,
             Self::Verdict { id, verdict } => {
-                output.push(CommandType::Verdict as u8);
-                output.extend_from_slice(&id.to_le_bytes());
-                output.push(*verdict);
+                output[0] = CommandType::Verdict as u8;
+                output[1..9].copy_from_slice(&id.to_le_bytes());
+                output[9] = *verdict;
             }
             Self::UpdateV4 {
                 protocol,
@@ -205,13 +231,13 @@ impl DriverCommand {
                 remote_port,
                 verdict,
             } => {
-                output.push(CommandType::UpdateV4 as u8);
-                output.push(*protocol);
-                output.extend_from_slice(local_address);
-                output.extend_from_slice(&local_port.to_le_bytes());
-                output.extend_from_slice(remote_address);
-                output.extend_from_slice(&remote_port.to_le_bytes());
-                output.push(*verdict);
+                output[0] = CommandType::UpdateV4 as u8;
+                output[1] = *protocol;
+                output[2..6].copy_from_slice(local_address);
+                output[6..8].copy_from_slice(&local_port.to_le_bytes());
+                output[8..12].copy_from_slice(remote_address);
+                output[12..14].copy_from_slice(&remote_port.to_le_bytes());
+                output[14] = *verdict;
             }
             Self::UpdateV6 {
                 protocol,
@@ -221,22 +247,48 @@ impl DriverCommand {
                 remote_port,
                 verdict,
             } => {
-                output.push(CommandType::UpdateV6 as u8);
-                output.push(*protocol);
-                output.extend_from_slice(local_address);
-                output.extend_from_slice(&local_port.to_le_bytes());
-                output.extend_from_slice(remote_address);
-                output.extend_from_slice(&remote_port.to_le_bytes());
-                output.push(*verdict);
+                output[0] = CommandType::UpdateV6 as u8;
+                output[1] = *protocol;
+                output[2..18].copy_from_slice(local_address);
+                output[18..20].copy_from_slice(&local_port.to_le_bytes());
+                output[20..36].copy_from_slice(remote_address);
+                output[36..38].copy_from_slice(&remote_port.to_le_bytes());
+                output[38] = *verdict;
             }
-            Self::ClearCache => output.push(CommandType::ClearCache as u8),
-            Self::GetLogs => output.push(CommandType::GetLogs as u8),
-            Self::GetBandwidthStats => output.push(CommandType::GetBandwidthStats as u8),
-            Self::PrintMemoryStats => output.push(CommandType::PrintMemoryStats as u8),
+            Self::ClearCache => output[0] = CommandType::ClearCache as u8,
+            Self::GetLogs => output[0] = CommandType::GetLogs as u8,
+            Self::GetBandwidthStats => output[0] = CommandType::GetBandwidthStats as u8,
+            Self::PrintMemoryStats => output[0] = CommandType::PrintMemoryStats as u8,
             Self::CleanEndedConnections => {
-                output.push(CommandType::CleanEndedConnections as u8);
+                output[0] = CommandType::CleanEndedConnections as u8;
             }
         }
+
+        Ok(length)
+    }
+
+    /// Writes the command directly from a fixed-size stack buffer.
+    ///
+    /// This avoids allocating a Vec for one-off driver control messages.
+    pub fn write_to<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let mut buffer = [0_u8; 39];
+        let length = self
+            .encode_to_slice(&mut buffer)
+            .expect("the fixed command buffer fits every driver command");
+        writer.write_all(&buffer[..length])
+    }
+
+    /// Encodes the command into a reusable vector.
+    ///
+    /// Existing capacity is retained, so callers can reuse the same vector
+    /// for a sequence of driver commands.
+    pub fn encode_into(&self, output: &mut Vec<u8>) {
+        let length = self.encoded_len();
+        output.clear();
+        output.reserve(length);
+        output.resize(length, 0);
+        self.encode_to_slice(output)
+            .expect("the resized vector fits the command");
     }
 
     /// Encodes the command into a newly allocated byte vector.
@@ -445,6 +497,83 @@ mod tests {
 
         assert!(counts[0..7].iter().all(|count| *count > 0));
         assert!(counts[8] > 0);
+    }
+
+
+    #[test]
+    fn encodes_into_a_stack_slice() {
+        let command = DriverCommand::UpdateV6 {
+            protocol: 17,
+            local_address: [1; 16],
+            local_port: 0x1234,
+            remote_address: [2; 16],
+            remote_port: 0x5678,
+            verdict: 4,
+        };
+        let mut output = [0_u8; 39];
+        let length = command.encode_to_slice(&mut output).unwrap();
+
+        assert_eq!(length, 39);
+        assert_eq!(&output[..length], command.encode().as_slice());
+    }
+
+    #[test]
+    fn undersized_slice_is_left_unchanged() {
+        let command = DriverCommand::UpdateV6 {
+            protocol: 17,
+            local_address: [1; 16],
+            local_port: 53,
+            remote_address: [2; 16],
+            remote_port: 443,
+            verdict: 2,
+        };
+        let mut output = [0xaa; 8];
+
+        assert_eq!(
+            command.encode_to_slice(&mut output),
+            Err(CommandEncodeError {
+                required: 39,
+                available: 8,
+            })
+        );
+        assert_eq!(output, [0xaa; 8]);
+    }
+
+    struct ChunkedWriter {
+        bytes: Vec<u8>,
+        max_chunk: usize,
+    }
+
+    impl std::io::Write for ChunkedWriter {
+        fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+            let count = input.len().min(self.max_chunk);
+            self.bytes.extend_from_slice(&input[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn writes_stack_encoded_command_through_short_writes() {
+        let command = DriverCommand::UpdateV4 {
+            protocol: 6,
+            local_address: [10, 0, 0, 1],
+            local_port: 1234,
+            remote_address: [1, 1, 1, 1],
+            remote_port: 443,
+            verdict: 2,
+        };
+        let mut writer = ChunkedWriter {
+            bytes: Vec::new(),
+            max_chunk: 2,
+        };
+
+        command.write_to(&mut writer).unwrap();
+
+        assert_eq!(writer.bytes, command.encode());
     }
 
     #[test]
