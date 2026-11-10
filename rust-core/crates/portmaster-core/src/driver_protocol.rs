@@ -320,6 +320,52 @@ mod tests {
     }
 
     #[test]
+    fn encodes_ipv6_update_in_driver_wire_order() {
+        let command = DriverCommand::UpdateV6 {
+            protocol: 17,
+            local_address: [1; 16],
+            local_port: 0x1234,
+            remote_address: [2; 16],
+            remote_port: 0x5678,
+            verdict: 4,
+        };
+        let bytes = command.encode();
+
+        assert_eq!(bytes.len(), 39);
+        assert_eq!(bytes[0], CommandType::UpdateV6 as u8);
+        assert_eq!(bytes[1], 17);
+        assert_eq!(&bytes[18..20], &[0x34, 0x12]);
+        assert_eq!(&bytes[36..38], &[0x78, 0x56]);
+        assert_eq!(bytes[38], 4);
+    }
+
+    #[test]
+    fn encodes_single_byte_control_commands() {
+        let commands = [
+            (DriverCommand::Shutdown, CommandType::Shutdown),
+            (DriverCommand::ClearCache, CommandType::ClearCache),
+            (DriverCommand::GetLogs, CommandType::GetLogs),
+            (
+                DriverCommand::GetBandwidthStats,
+                CommandType::GetBandwidthStats,
+            ),
+            (
+                DriverCommand::PrintMemoryStats,
+                CommandType::PrintMemoryStats,
+            ),
+            (
+                DriverCommand::CleanEndedConnections,
+                CommandType::CleanEndedConnections,
+            ),
+        ];
+
+        for (command, expected) in commands {
+            assert_eq!(command.encoded_len(), 1);
+            assert_eq!(command.encode(), [expected as u8]);
+        }
+    }
+
+    #[test]
     fn reuses_preallocated_command_buffer() {
         let command = DriverCommand::UpdateV6 {
             protocol: 17,
