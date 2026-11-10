@@ -87,3 +87,9 @@ The Rust core now contains a bounded DNS response cache policy model. Its defaul
 The cache models successful, refresh-soon, stale-success, and expired-backup lookup states, and only stores success, NXDOMAIN, and REFUSED responses. It is bounded by entry count, a 65,535-byte per-response default, and a 32 MiB total payload budget.
 
 This is only the cache lifecycle and policy layer. It does not yet parse DNS wire messages, implement resolver selection/compliance, persist NameRecords, perform DoH/DoT, or apply per-process filtering. No latency or memory reduction is claimed until the cache is connected to actual DNS traffic and measured against the Go implementation.
+
+## DNS request coalescing
+
+The Rust core now has a bounded coordinator for identical DNS questions. One caller becomes the leader; other callers wait for its completion and are expected to re-check the DNS cache. A leader that exceeds the configured deadline can be superseded, and an old leader's eventual drop cannot unregister the newer flight. Waiters can cancel, and a full registry lets unrelated work continue as an untracked leader rather than blocking.
+
+The coordinator is not yet connected to the Rust DNS cache or any upstream resolver. It provides the concurrency primitive only; it must be integrated with cache re-checking and actual query cancellation before it can replace the Go resolver's request deduplication path.

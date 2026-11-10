@@ -86,7 +86,6 @@ pub struct DnsRequestCoalescer {
 }
 
 /// Result returned when a caller attempts to start or join a DNS request.
-#[derive(Debug)]
 pub enum DnsRequestStart {
     Leader(DnsRequestGuard),
     CompletedByPeer,

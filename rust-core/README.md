@@ -6,6 +6,7 @@ The workspace now contains reusable building blocks:
 - connection identity types for TCP and UDP;
 - validated core resource-limit configuration;
 - a DNS response cache with Portmaster-compatible TTL, negative-response, stale-answer and refresh-window policies, plus count and byte limits;
+- a bounded single-flight DNS request coordinator with cancellation, timeout recovery and safe leader replacement;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
 - safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and a generic transport adapter for the existing Windows driver protocol;
@@ -41,6 +42,7 @@ rust-core/
         config.rs
         connection.rs
         dns_cache.rs
+        dns_coalescer.rs
         driver_info.rs
         driver_protocol.rs
         driver_stream.rs

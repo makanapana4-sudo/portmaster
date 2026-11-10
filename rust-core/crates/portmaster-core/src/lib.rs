@@ -8,6 +8,7 @@ pub mod cache;
 pub mod config;
 pub mod connection;
 pub mod dns_cache;
+pub mod dns_coalescer;
 pub mod driver_info;
 pub mod driver_protocol;
 pub mod driver_stream;
@@ -18,6 +19,9 @@ pub mod event_queue;
 pub use cache::{BoundedTtlCache, CacheConfigError};
 pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
+pub use dns_coalescer::{
+    DnsCoalescerConfigError, DnsRequestCoalescer, DnsRequestGuard, DnsRequestStart,
+};
 pub use dns_cache::{
     DnsCache, DnsCacheConfigError, DnsCacheEntry, DnsCacheLookup, DnsCacheLookupKind,
     DnsCachePolicy, DnsQueryKey, DnsResponseMetadata, DNS_RCODE_NAME_ERROR,
