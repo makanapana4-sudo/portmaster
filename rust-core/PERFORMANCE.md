@@ -45,3 +45,17 @@ Do not publish percentage improvements until repeatable measurements are availab
 The Go Windows driver command writer now serializes verdict, IPv4 update, and IPv6 update messages into fixed-size byte arrays rather than passing structs through `encoding/binary.Write`. This removes reflection-based struct serialization from those calls and reuses fixed-size stack-shaped buffers in the source code. The writer also handles partial writes and reports a zero-byte write as `io.ErrShortWrite`.
 
 The change is protocol-preserving and has byte-layout and short-write tests. It affects driver control messages, not every packet, DNS lookup, or application startup. No allocation benchmark or end-to-end CPU saving has been measured yet, so do not extrapolate it into an overall Portmaster percentage.
+
+## Protocol parsing safeguards and microbenchmarks
+
+The Go driver-info parser now rejects frames larger than 16 MiB before attempting to read their body. It validates bandwidth-record counts against the remaining bytes in the declared frame before allocating a slice, checks every fixed-size read against the current frame boundary, and drains unread frame bytes in chunks rather than allocating a buffer equal to the remaining frame length.
+
+The Rust core now decodes all seven driver info message types. Connection packet payloads, log messages, and bandwidth record storage are borrowed from the original frame. Bandwidth records are decoded on demand by index or iterator, avoiding a second allocation for a slice of decoded records.
+
+The Go command writer includes microbenchmarks comparing the fixed-buffer serialization against the previous `encoding/binary.Write` approach:
+
+```sh
+go test ./windows_kext/kextinterface -run '^$' -bench=Command -benchmem
+```
+
+Run the benchmarks on the same machine and Go version, and compare repeated runs. These microbenchmarks isolate the serialization function; they do not measure full Portmaster CPU usage or startup time.
