@@ -19,6 +19,7 @@ on:
       - main
     paths:
       - 'rust-core/**'
+      - 'windows_kext/protocol/**'
       - '.github/workflows/rust-core.yml'
 
 permissions:
