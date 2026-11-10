@@ -581,6 +581,26 @@ mod tests {
     }
 
     #[test]
+    fn accepts_empty_bandwidth_arrays() {
+        let bytes = [6, 0, 0, 0, 0];
+        let parsed = parse_driver_info(frame(InfoKind::BandwidthStatsV4, &bytes)).unwrap();
+        let DriverInfo::BandwidthV4(stats) = parsed else {
+            panic!("expected IPv4 bandwidth stats");
+        };
+        assert_eq!(stats.len(), 0);
+        assert!(stats.is_empty());
+        assert_eq!(stats.iter().count(), 0);
+
+        let parsed = parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)).unwrap();
+        let DriverInfo::BandwidthV6(stats) = parsed else {
+            panic!("expected IPv6 bandwidth stats");
+        };
+        assert_eq!(stats.len(), 0);
+        assert!(stats.is_empty());
+        assert_eq!(stats.iter().count(), 0);
+    }
+
+    #[test]
     fn rejects_bandwidth_count_that_exceeds_the_frame() {
         let bytes = [6, 0xff, 0xff, 0xff, 0xff];
         assert!(matches!(
