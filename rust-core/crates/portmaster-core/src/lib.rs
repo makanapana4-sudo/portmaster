@@ -16,7 +16,7 @@ pub use cache::{BoundedTtlCache, CacheConfigError};
 pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
 pub use driver_info::{
-    parse_driver_info, BandwidthStatsV4, BandwidthStatsV6, BandwidthValueV4,
+    parse_driver_info, parse_driver_info_frame, BandwidthStatsV4, BandwidthStatsV6, BandwidthValueV4,
     BandwidthValueV6, ConnectionEndV4, ConnectionEndV6, ConnectionInfoV4,
     ConnectionInfoV6, DriverInfo,
 };
