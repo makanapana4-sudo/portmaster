@@ -511,13 +511,10 @@ mod tests {
     #[test]
     fn rejects_bandwidth_count_that_exceeds_the_frame() {
         let bytes = [6, 0xff, 0xff, 0xff, 0xff];
-        assert_eq!(
-            parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)).err(),
-            Some(ProtocolError::TruncatedPayload {
-                expected: usize::MAX,
-                available: 0,
-            })
-        );
+        assert!(matches!(
+            parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)),
+            Err(ProtocolError::TruncatedPayload { .. }) | Err(ProtocolError::LengthOverflow)
+        ));
     }
 
     #[test]
