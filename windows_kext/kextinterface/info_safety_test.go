@@ -220,3 +220,25 @@ func BenchmarkRecvInfoBandwidthV4(b *testing.B) {
 		}
 	}
 }
+
+func TestRecvInfoAcceptsEmptyBandwidthArrays(t *testing.T) {
+	for _, infoType := range []byte{InfoBandwidthStatsV4, InfoBandwidthStatsV6} {
+		payload := make([]byte, 5)
+		payload[0] = 6
+		frame := makeInfoFrame(infoType, payload)
+
+		info, err := RecvInfo(bytes.NewReader(frame))
+		if err != nil {
+			t.Fatalf("type %d: %v", infoType, err)
+		}
+		if info.BandwidthStats == nil {
+			t.Fatalf("type %d: expected bandwidth stats", infoType)
+		}
+		if infoType == InfoBandwidthStatsV4 && len(info.BandwidthStats.ValuesV4) != 0 {
+			t.Fatalf("unexpected IPv4 bandwidth entries: %d", len(info.BandwidthStats.ValuesV4))
+		}
+		if infoType == InfoBandwidthStatsV6 && len(info.BandwidthStats.ValuesV6) != 0 {
+			t.Fatalf("unexpected IPv6 bandwidth entries: %d", len(info.BandwidthStats.ValuesV6))
+		}
+	}
+}
