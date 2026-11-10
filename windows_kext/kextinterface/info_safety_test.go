@@ -242,3 +242,30 @@ func TestRecvInfoAcceptsEmptyBandwidthArrays(t *testing.T) {
 		}
 	}
 }
+
+type oneByteReader struct {
+	source *bytes.Reader
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if len(p) > 1 {
+		p = p[:1]
+	}
+	return r.source.Read(p)
+}
+
+func TestRecvInfoHandlesFragmentedReads(t *testing.T) {
+	frame := makeInfoFrame(InfoLogLine, []byte{4, 's', 'p', 'l', 'i', 't'})
+	reader := &oneByteReader{source: bytes.NewReader(frame)}
+
+	info, err := RecvInfo(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.LogLine == nil {
+		t.Fatal("expected a log line")
+	}
+	if info.LogLine.Severity != 4 || info.LogLine.Line != "split" {
+		t.Fatalf("unexpected log line: %+v", info.LogLine)
+	}
+}
