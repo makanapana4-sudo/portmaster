@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
-enum InfoType {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InfoType {
     LogLine = 0,
     ConnectionIpv4 = 1,
     ConnectionIpv6 = 2,
