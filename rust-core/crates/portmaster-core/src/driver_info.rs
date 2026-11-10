@@ -607,7 +607,8 @@ mod tests {
 
     #[test]
     fn decodes_checked_in_driver_event_fixture() {
-        let fixture = include_bytes!("../../../../windows_kext/kextinterface/testdata/rust_info_test.bin");
+        let fixture =
+            include_bytes!("../../../../windows_kext/kextinterface/testdata/rust_info_test.bin");
         let (malformed, first_frame_len) =
             parse_info_frame(fixture, DEFAULT_MAX_INFO_PAYLOAD).unwrap();
         assert_eq!(malformed.kind, InfoKind::ConnectionIpv4);
@@ -639,10 +640,7 @@ mod tests {
                     assert_eq!(connection.local_port, 5);
                     assert_eq!(connection.remote_port, 6);
                     assert_eq!(connection.payload_layer, 7);
-                    assert_eq!(
-                        connection.packet_payload,
-                        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                    );
+                    assert_eq!(connection.packet_payload, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
                 }
                 DriverInfo::ConnectionV6(connection) => {
                     assert_eq!(connection.id, 1);
@@ -723,7 +721,9 @@ mod tests {
                         Some(BandwidthValueV6 {
                             local_address: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
                             local_port: 1,
-                            remote_address: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+                            remote_address: [
+                                2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17
+                            ],
                             remote_port: 2,
                             transmitted_bytes: 3,
                             received_bytes: 4,

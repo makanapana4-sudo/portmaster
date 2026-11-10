@@ -298,10 +298,7 @@ mod tests {
     fn encodes_verdict_using_driver_wire_layout() {
         let command = DriverCommand::Verdict { id: 1, verdict: 2 };
         assert_eq!(command.encoded_len(), 10);
-        assert_eq!(
-            command.encode().as_slice(),
-            &[1, 1, 0, 0, 0, 0, 0, 0, 0, 2]
-        );
+        assert_eq!(command.encode().as_slice(), &[1, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
     }
 
     #[test]
@@ -370,7 +367,8 @@ mod tests {
 
     #[test]
     fn matches_checked_in_go_command_fixture() {
-        let fixture = include_bytes!("../../../../windows_kext/protocol/testdata/go_command_test.bin");
+        let fixture =
+            include_bytes!("../../../../windows_kext/protocol/testdata/go_command_test.bin");
         let mut offset = 0;
         let mut counts = [0usize; 9];
 
@@ -379,7 +377,8 @@ mod tests {
             let command = match command_type {
                 value if value == CommandType::Shutdown as u8 => DriverCommand::Shutdown,
                 value if value == CommandType::Verdict as u8 => {
-                    let id = u64::from_le_bytes(fixture[offset + 1..offset + 9].try_into().unwrap());
+                    let id =
+                        u64::from_le_bytes(fixture[offset + 1..offset + 9].try_into().unwrap());
                     DriverCommand::Verdict {
                         id,
                         verdict: fixture[offset + 9],
@@ -395,7 +394,10 @@ mod tests {
                         local_address,
                         local_port: u16::from_le_bytes([fixture[offset + 6], fixture[offset + 7]]),
                         remote_address,
-                        remote_port: u16::from_le_bytes([fixture[offset + 12], fixture[offset + 13]]),
+                        remote_port: u16::from_le_bytes([
+                            fixture[offset + 12],
+                            fixture[offset + 13],
+                        ]),
                         verdict: fixture[offset + 14],
                     }
                 }
@@ -407,9 +409,15 @@ mod tests {
                     DriverCommand::UpdateV6 {
                         protocol: fixture[offset + 1],
                         local_address,
-                        local_port: u16::from_le_bytes([fixture[offset + 18], fixture[offset + 19]]),
+                        local_port: u16::from_le_bytes([
+                            fixture[offset + 18],
+                            fixture[offset + 19],
+                        ]),
                         remote_address,
-                        remote_port: u16::from_le_bytes([fixture[offset + 36], fixture[offset + 37]]),
+                        remote_port: u16::from_le_bytes([
+                            fixture[offset + 36],
+                            fixture[offset + 37],
+                        ]),
                         verdict: fixture[offset + 38],
                     }
                 }
