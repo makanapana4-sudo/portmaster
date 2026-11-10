@@ -42,7 +42,10 @@ mod tests {
 
     #[test]
     fn rejects_zero_capacity() {
-        assert_eq!(bounded_event_queue::<u8>(0).err(), Some(QueueConfigError::ZeroCapacity));
+        assert_eq!(
+            bounded_event_queue::<u8>(0).err(),
+            Some(QueueConfigError::ZeroCapacity)
+        );
     }
 
     #[test]
@@ -60,6 +63,9 @@ mod tests {
     fn disconnected_receiver_is_reported() {
         let (sender, receiver) = bounded_event_queue::<u8>(1).unwrap();
         drop(receiver);
-        assert!(matches!(sender.try_send(1), Err(TrySendError::Disconnected(1))));
+        assert!(matches!(
+            sender.try_send(1),
+            Err(TrySendError::Disconnected(1))
+        ));
     }
 }
