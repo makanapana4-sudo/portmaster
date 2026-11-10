@@ -1,4 +1,4 @@
-use protocol::command::CommandType;
+use protocol::{command::CommandType, info::InfoType as DriverInfoType};
 use std::convert::TryFrom;
 
 /// Maximum payload accepted by the default driver-info parser.
@@ -22,13 +22,21 @@ impl TryFrom<u8> for InfoKind {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::LogLine),
-            1 => Ok(Self::ConnectionIpv4),
-            2 => Ok(Self::ConnectionIpv6),
-            3 => Ok(Self::ConnectionEndV4),
-            4 => Ok(Self::ConnectionEndV6),
-            5 => Ok(Self::BandwidthStatsV4),
-            6 => Ok(Self::BandwidthStatsV6),
+            value if value == DriverInfoType::LogLine as u8 => Ok(Self::LogLine),
+            value if value == DriverInfoType::ConnectionIpv4 as u8 => Ok(Self::ConnectionIpv4),
+            value if value == DriverInfoType::ConnectionIpv6 as u8 => Ok(Self::ConnectionIpv6),
+            value if value == DriverInfoType::ConnectionEndEventV4 as u8 => {
+                Ok(Self::ConnectionEndV4)
+            }
+            value if value == DriverInfoType::ConnectionEndEventV6 as u8 => {
+                Ok(Self::ConnectionEndV6)
+            }
+            value if value == DriverInfoType::BandwidthStatsV4 as u8 => {
+                Ok(Self::BandwidthStatsV4)
+            }
+            value if value == DriverInfoType::BandwidthStatsV6 as u8 => {
+                Ok(Self::BandwidthStatsV6)
+            }
             other => Err(ProtocolError::UnknownInfoType(other)),
         }
     }
