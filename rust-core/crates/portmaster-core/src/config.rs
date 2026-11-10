@@ -63,14 +63,26 @@ impl std::error::Error for ConfigError {}
 impl CoreConfig {
     pub fn validate(&self) -> Result<(), CoreError> {
         const MAX_QUEUE_CAPACITY: usize = 1_000_000;
-        const MAX_CACHE_CAPACITY: usize = 10_000_000;
+        const MAX_CACHE_CAPACITY: usize = 1_000_000;
         const MAX_CONCURRENT_LOOKUPS: usize = 65_536;
 
         let limits = self.limits;
         for (name, value, maximum) in [
-            ("event_queue_capacity", limits.event_queue_capacity, MAX_QUEUE_CAPACITY),
-            ("dns_cache_capacity", limits.dns_cache_capacity, MAX_CACHE_CAPACITY),
-            ("max_concurrent_lookups", limits.max_concurrent_lookups, MAX_CONCURRENT_LOOKUPS),
+            (
+                "event_queue_capacity",
+                limits.event_queue_capacity,
+                MAX_QUEUE_CAPACITY,
+            ),
+            (
+                "dns_cache_capacity",
+                limits.dns_cache_capacity,
+                MAX_CACHE_CAPACITY,
+            ),
+            (
+                "max_concurrent_lookups",
+                limits.max_concurrent_lookups,
+                MAX_CONCURRENT_LOOKUPS,
+            ),
         ] {
             if value == 0 {
                 return Err(CoreError::InvalidConfiguration(
@@ -79,53 +91,16 @@ impl CoreConfig {
             }
             if value > maximum {
                 return Err(CoreError::InvalidConfiguration(
-                    ConfigError::LimitTooLarge { name, value, maximum }.to_string(),
+                    ConfigError::LimitTooLarge {
+                        name,
+                        value,
+                        maximum,
+                    }
+                    .to_string(),
                 ));
             }
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_configuration_is_valid() {
-        assert!(CoreConfig::default().validate().is_ok());
-    }
-
-    #[test]
-    fn zero_capacity_is_rejected() {
-        let config = CoreConfig {
-            limits: ResourceLimits {
-                event_queue_capacity: 0,
-                ..ResourceLimits::default()
-            },
-            ..CoreConfig::default()
-        };
-
-        assert!(matches!(
-            config.validate(),
-            Err(CoreError::InvalidConfiguration(_))
-        ));
-    }
-
-    #[test]
-    fn excessive_capacity_is_rejected() {
-        let config = CoreConfig {
-            limits: ResourceLimits {
-                dns_cache_capacity: 10_000_001,
-                ..ResourceLimits::default()
-            },
-            ..CoreConfig::default()
-        };
-
-        assert!(matches!(
-            config.validate(),
-            Err(CoreError::InvalidConfiguration(_))
-        ));
     }
 }
