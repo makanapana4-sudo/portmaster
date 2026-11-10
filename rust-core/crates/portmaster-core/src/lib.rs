@@ -4,10 +4,14 @@
 //! with the Windows kernel driver. Those integrations require separate,
 //! compatibility-tested milestones.
 
+pub mod cache;
 pub mod config;
 pub mod connection;
 pub mod error;
+pub mod event_queue;
 
-pub use config::{CoreConfig, ConfigError, ResourceLimits};
+pub use cache::{BoundedTtlCache, CacheConfigError};
+pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
 pub use error::CoreError;
+pub use event_queue::{bounded_event_queue, QueueConfigError};
