@@ -169,10 +169,7 @@ impl BandwidthStatsV6<'_> {
 /// original input frame, so parsing does not copy large payloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriverInfo<'a> {
-    LogLine {
-        severity: u8,
-        message: &'a [u8],
-    },
+    LogLine { severity: u8, message: &'a [u8] },
     ConnectionV4(ConnectionInfoV4<'a>),
     ConnectionV6(ConnectionInfoV6<'a>),
     ConnectionEndV4(ConnectionEndV4),
@@ -182,9 +179,7 @@ pub enum DriverInfo<'a> {
 }
 
 /// Parses and decodes one complete frame using the default 16 MiB size limit.
-pub fn parse_driver_info_frame(
-    input: &[u8],
-) -> Result<(DriverInfo<'_>, usize), ProtocolError> {
+pub fn parse_driver_info_frame(input: &[u8]) -> Result<(DriverInfo<'_>, usize), ProtocolError> {
     let (frame, consumed) = parse_info_frame(input, DEFAULT_MAX_INFO_PAYLOAD)?;
     let info = parse_driver_info(frame)?;
     Ok((info, consumed))
@@ -195,9 +190,7 @@ pub fn parse_driver_info_frame(
 /// The function validates each fixed-size field and each advertised payload
 /// length. Variable-length packet bytes and bandwidth records are borrowed
 /// from the original frame rather than copied into new allocations.
-pub fn parse_driver_info<'a>(
-    frame: InfoFrame<'a>,
-) -> Result<DriverInfo<'a>, ProtocolError> {
+pub fn parse_driver_info<'a>(frame: InfoFrame<'a>) -> Result<DriverInfo<'a>, ProtocolError> {
     let mut reader = SliceReader::new(frame.payload);
 
     match frame.kind {
@@ -412,7 +405,10 @@ mod tests {
         assert_eq!(connection.remote_port, 443);
         assert_eq!(connection.payload_layer, 2);
         assert_eq!(connection.packet_payload, &[9, 8, 7]);
-        assert!(std::ptr::eq(connection.packet_payload.as_ptr(), bytes[35..].as_ptr()));
+        assert!(std::ptr::eq(
+            connection.packet_payload.as_ptr(),
+            bytes[35..].as_ptr()
+        ));
     }
 
     #[test]

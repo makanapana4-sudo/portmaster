@@ -49,11 +49,7 @@ impl DriverInfoStream {
     /// The callback runs before the internal buffer is reused. Do not retain
     /// slices from the supplied DriverInfo; copy data that must outlive
     /// the callback.
-    pub fn feed<F>(
-        &mut self,
-        mut input: &[u8],
-        mut on_info: F,
-    ) -> Result<usize, ProtocolError>
+    pub fn feed<F>(&mut self, mut input: &[u8], mut on_info: F) -> Result<usize, ProtocolError>
     where
         F: FnMut(DriverInfo<'_>),
     {

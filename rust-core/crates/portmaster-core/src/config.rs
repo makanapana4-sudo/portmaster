@@ -28,7 +28,6 @@ pub struct CoreConfig {
     pub enable_metrics: bool,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
     ZeroLimit(&'static str),
