@@ -269,3 +269,42 @@ func TestRecvInfoHandlesFragmentedReads(t *testing.T) {
 		t.Fatalf("unexpected log line: %+v", info.LogLine)
 	}
 }
+
+func TestRecvInfoDecodesBandwidthAcrossBatchBoundary(t *testing.T) {
+	const recordCount = bandwidthBatchRecords + 3
+	payload := make([]byte, 5+recordCount*bandwidthValueV4Size)
+	payload[0] = 6
+	binary.LittleEndian.PutUint32(payload[1:5], recordCount)
+
+	for index := 0; index < recordCount; index++ {
+		offset := 5 + index*bandwidthValueV4Size
+		payload[offset] = byte(index)
+		binary.LittleEndian.PutUint16(payload[offset+4:offset+6], uint16(1000+index))
+		payload[offset+6] = byte(index + 1)
+		binary.LittleEndian.PutUint16(payload[offset+10:offset+12], 443)
+		binary.LittleEndian.PutUint64(payload[offset+12:offset+20], uint64(index+10))
+		binary.LittleEndian.PutUint64(payload[offset+20:offset+28], uint64(index+20))
+	}
+
+	info, err := RecvInfo(bytes.NewReader(makeInfoFrame(InfoBandwidthStatsV4, payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.BandwidthStats == nil {
+		t.Fatal("expected bandwidth statistics")
+	}
+	values := info.BandwidthStats.ValuesV4
+	if len(values) != recordCount {
+		t.Fatalf("got %d records, want %d", len(values), recordCount)
+	}
+
+	last := values[recordCount-1]
+	if last.LocalIP[0] != byte(recordCount-1) ||
+		last.LocalPort != uint16(1000+recordCount-1) ||
+		last.RemoteIP[0] != byte(recordCount) ||
+		last.RemotePort != 443 ||
+		last.TransmittedBytes != uint64(recordCount+9) ||
+		last.ReceivedBytes != uint64(recordCount+19) {
+		t.Fatalf("last record decoded incorrectly: %+v", last)
+	}
+}

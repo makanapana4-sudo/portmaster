@@ -19,6 +19,8 @@ const (
 	maxInfoPayloadSize    = 16 << 20
 	bandwidthValueV4Size = 28
 	bandwidthValueV6Size = 52
+	bandwidthBatchRecords = 64
+	bandwidthBatchBytes = bandwidthBatchRecords * bandwidthValueV6Size
 )
 
 var (
@@ -279,38 +281,78 @@ func (r *readHelper) readConnectionEndV6() (ConnectionEndV6, error) {
 	return value, nil
 }
 
-func (r *readHelper) readBandwidthValueV4() (BandwidthValueV4, error) {
-	var raw [bandwidthValueV4Size]byte
-	if err := r.ReadFixed(raw[:]); err != nil {
-		return BandwidthValueV4{}, err
+func (r *readHelper) readBandwidthValuesV4(count uint32) ([]BandwidthValueV4, error) {
+	if err := r.validateArrayCount(count, bandwidthValueV4Size); err != nil {
+		return nil, err
 	}
 
-	value := BandwidthValueV4{
-		LocalPort:        binary.LittleEndian.Uint16(raw[4:6]),
-		RemotePort:       binary.LittleEndian.Uint16(raw[10:12]),
-		TransmittedBytes: binary.LittleEndian.Uint64(raw[12:20]),
-		ReceivedBytes:    binary.LittleEndian.Uint64(raw[20:28]),
+	values := make([]BandwidthValueV4, int(count))
+	var batch [bandwidthBatchBytes]byte
+
+	for offset := 0; offset < len(values); {
+		batchCount := len(values) - offset
+		if batchCount > bandwidthBatchRecords {
+			batchCount = bandwidthBatchRecords
+		}
+		batchSize := batchCount * bandwidthValueV4Size
+		if err := r.ReadFixed(batch[:batchSize]); err != nil {
+			return nil, err
+		}
+
+		for index := 0; index < batchCount; index++ {
+			raw := batch[index*bandwidthValueV4Size : (index+1)*bandwidthValueV4Size]
+			value := BandwidthValueV4{
+				LocalPort:        binary.LittleEndian.Uint16(raw[4:6]),
+				RemotePort:       binary.LittleEndian.Uint16(raw[10:12]),
+				TransmittedBytes: binary.LittleEndian.Uint64(raw[12:20]),
+				ReceivedBytes:    binary.LittleEndian.Uint64(raw[20:28]),
+			}
+			copy(value.LocalIP[:], raw[0:4])
+			copy(value.RemoteIP[:], raw[6:10])
+			values[offset+index] = value
+		}
+
+		offset += batchCount
 	}
-	copy(value.LocalIP[:], raw[0:4])
-	copy(value.RemoteIP[:], raw[6:10])
-	return value, nil
+
+	return values, nil
 }
 
-func (r *readHelper) readBandwidthValueV6() (BandwidthValueV6, error) {
-	var raw [bandwidthValueV6Size]byte
-	if err := r.ReadFixed(raw[:]); err != nil {
-		return BandwidthValueV6{}, err
+func (r *readHelper) readBandwidthValuesV6(count uint32) ([]BandwidthValueV6, error) {
+	if err := r.validateArrayCount(count, bandwidthValueV6Size); err != nil {
+		return nil, err
 	}
 
-	value := BandwidthValueV6{
-		LocalPort:        binary.LittleEndian.Uint16(raw[16:18]),
-		RemotePort:       binary.LittleEndian.Uint16(raw[34:36]),
-		TransmittedBytes: binary.LittleEndian.Uint64(raw[36:44]),
-		ReceivedBytes:    binary.LittleEndian.Uint64(raw[44:52]),
+	values := make([]BandwidthValueV6, int(count))
+	var batch [bandwidthBatchBytes]byte
+
+	for offset := 0; offset < len(values); {
+		batchCount := len(values) - offset
+		if batchCount > bandwidthBatchRecords {
+			batchCount = bandwidthBatchRecords
+		}
+		batchSize := batchCount * bandwidthValueV6Size
+		if err := r.ReadFixed(batch[:batchSize]); err != nil {
+			return nil, err
+		}
+
+		for index := 0; index < batchCount; index++ {
+			raw := batch[index*bandwidthValueV6Size : (index+1)*bandwidthValueV6Size]
+			value := BandwidthValueV6{
+				LocalPort:        binary.LittleEndian.Uint16(raw[16:18]),
+				RemotePort:       binary.LittleEndian.Uint16(raw[34:36]),
+				TransmittedBytes: binary.LittleEndian.Uint64(raw[36:44]),
+				ReceivedBytes:    binary.LittleEndian.Uint64(raw[44:52]),
+			}
+			copy(value.LocalIP[:], raw[0:16])
+			copy(value.RemoteIP[:], raw[18:34])
+			values[offset+index] = value
+		}
+
+		offset += batchCount
 	}
-	copy(value.LocalIP[:], raw[0:16])
-	copy(value.RemoteIP[:], raw[18:34])
-	return value, nil
+
+	return values, nil
 }
 
 func (r *readHelper) validateArrayCount(count uint32, elementSize uint32) error {
@@ -460,16 +502,9 @@ func RecvInfo(reader io.Reader) (*Info, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 count: %w", readErr)
 		}
-		if readErr = helper.validateArrayCount(size, bandwidthValueV4Size); readErr != nil {
-			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 count: %w", readErr)
-		}
-
-		statsArray := make([]BandwidthValueV4, int(size))
-		for i := range statsArray {
-			statsArray[i], readErr = helper.readBandwidthValueV4()
-			if readErr != nil {
-				return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 record %d: %w", i, readErr)
-			}
+		statsArray, readErr := helper.readBandwidthValuesV4(size)
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 records: %w", readErr)
 		}
 		return &Info{BandwidthStats: &BandwidthStatsArray{Protocol: protocol, ValuesV4: statsArray}}, nil
 
@@ -482,16 +517,9 @@ func RecvInfo(reader io.Reader) (*Info, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 count: %w", readErr)
 		}
-		if readErr = helper.validateArrayCount(size, bandwidthValueV6Size); readErr != nil {
-			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 count: %w", readErr)
-		}
-
-		statsArray := make([]BandwidthValueV6, int(size))
-		for i := range statsArray {
-			statsArray[i], readErr = helper.readBandwidthValueV6()
-			if readErr != nil {
-				return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 record %d: %w", i, readErr)
-			}
+		statsArray, readErr := helper.readBandwidthValuesV6(size)
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 records: %w", readErr)
 		}
 		return &Info{BandwidthStats: &BandwidthStatsArray{Protocol: protocol, ValuesV6: statsArray}}, nil
 	}
