@@ -1,3 +1,4 @@
+use crate::dns_wire::{parse_dns_message, rewrite_resource_record_ttls, DnsWireError};
 use std::collections::{HashMap, VecDeque};
 
 const MAX_CACHE_CAPACITY: usize = 1_000_000;
@@ -183,6 +184,16 @@ pub struct DnsCacheEntry {
 }
 
 impl DnsCacheEntry {
+    /// Creates a response copy with record TTLs rewritten to the client TTL.
+    ///
+    /// The cached bytes remain unchanged, so repeated client replies do not
+    /// progressively alter the stored response.
+    pub fn prepare_client_response(&self) -> Result<Vec<u8>, DnsWireError> {
+        let mut response = self.payload.clone();
+        rewrite_resource_record_ttls(&mut response, self.client_record_ttl_secs)?;
+        Ok(response)
+    }
+
     #[must_use]
     pub const fn key(&self) -> &DnsQueryKey {
         &self.key
@@ -227,6 +238,44 @@ pub enum DnsCacheLookupKind {
     RefreshSoon,
     StaleSuccess,
     ExpiredBackup,
+}
+
+/// Errors returned when a raw DNS wire response is inserted into the cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsWireCacheError {
+    Wire(DnsWireError),
+    CacheKey(DnsCacheConfigError),
+    NotAResponse,
+    TruncatedResponse,
+    InvalidQuestionCount,
+}
+
+impl std::fmt::Display for DnsWireCacheError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Wire(error) => write!(formatter, "invalid DNS message: {error}"),
+            Self::CacheKey(error) => write!(formatter, "invalid DNS cache key: {error}"),
+            Self::NotAResponse => formatter.write_str("DNS message is not a response"),
+            Self::TruncatedResponse => formatter.write_str("truncated DNS response cannot be cached"),
+            Self::InvalidQuestionCount => {
+                formatter.write_str("DNS response must contain exactly one question")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DnsWireCacheError {}
+
+impl From<DnsWireError> for DnsWireCacheError {
+    fn from(error: DnsWireError) -> Self {
+        Self::Wire(error)
+    }
+}
+
+impl From<DnsCacheConfigError> for DnsWireCacheError {
+    fn from(error: DnsCacheConfigError) -> Self {
+        Self::CacheKey(error)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -296,6 +345,47 @@ impl DnsCache {
             insertion_order: VecDeque::new(),
             generation: 0,
         })
+    }
+
+    /// Parses and inserts a raw DNS response using its question and RR TTLs.
+    ///
+    /// The response is accepted only when it is a complete response with one
+    /// question. Connectivity and online state are supplied by the caller
+    /// because they come from Portmaster's network environment, not the DNS
+    /// packet itself.
+    pub fn insert_dns_wire_response(
+        &mut self,
+        payload: Vec<u8>,
+        is_connectivity_domain: bool,
+        online: bool,
+        no_caching: bool,
+        now_unix: u64,
+    ) -> Result<bool, DnsWireCacheError> {
+        let metadata = parse_dns_message(&payload)?;
+        if !metadata.is_response() {
+            return Err(DnsWireCacheError::NotAResponse);
+        }
+        if metadata.is_truncated() {
+            return Err(DnsWireCacheError::TruncatedResponse);
+        }
+        if metadata.question_count != 1 {
+            return Err(DnsWireCacheError::InvalidQuestionCount);
+        }
+
+        let question = metadata
+            .first_question
+            .as_ref()
+            .ok_or(DnsWireCacheError::InvalidQuestionCount)?;
+        let key = question.cache_key()?;
+        let response_metadata = metadata.cache_metadata(is_connectivity_domain, online);
+
+        Ok(self.insert(
+            key,
+            payload,
+            response_metadata,
+            no_caching,
+            now_unix,
+        ))
     }
 
     /// Inserts a cacheable response. Returns false for no-cache requests,

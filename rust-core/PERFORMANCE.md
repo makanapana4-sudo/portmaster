@@ -93,3 +93,11 @@ This is only the cache lifecycle and policy layer. It does not yet parse DNS wir
 The Rust core now has a bounded coordinator for identical DNS questions. One caller becomes the leader; other callers wait for its completion and are expected to re-check the DNS cache. A leader that exceeds the configured deadline can be superseded, and an old leader's eventual drop cannot unregister the newer flight. Waiters can cancel, and a full registry lets unrelated work continue as an untracked leader rather than blocking.
 
 The coordinator is not yet connected to the Rust DNS cache or any upstream resolver. It provides the concurrency primitive only; it must be integrated with cache re-checking and actual query cancellation before it can replace the Go resolver's request deduplication path.
+
+## DNS wire-message parsing and response preparation
+
+The DNS cache can now ingest a raw wire response through a validated single-question path. The parser reads the DNS header, decodes compressed names with pointer bounds and cycle checks, validates question and resource-record lengths, and calculates minimum TTL across answer, authority and additional sections. Cache metadata is derived directly from the parsed response rather than being reconstructed by the caller.
+
+Client responses can be prepared by cloning the cached bytes once and rewriting every resource-record TTL in place to the configured client TTL (17 seconds by default). The cached source bytes remain unchanged. Truncated or non-response packets are rejected before cache insertion.
+
+This still does not implement upstream resolver selection, UDP/TCP/DoH/DoT sockets, DNSSEC validation, query compliance, or filtering. Those need their own behavior-parity tests before the new parser is used in live traffic.

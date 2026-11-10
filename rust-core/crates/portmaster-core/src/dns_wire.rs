@@ -254,8 +254,11 @@ fn decode_name(packet: &[u8], start: usize) -> Result<(String, usize), DnsWireEr
 
         match length & 0xc0 {
             0xc0 => {
+                let second_offset = cursor
+                    .checked_add(1)
+                    .ok_or(DnsWireError::LengthOverflow)?;
                 let second = *packet
-                    .get(cursor + 1)
+                    .get(second_offset)
                     .ok_or(DnsWireError::TruncatedName)?;
                 let target = (usize::from(length & 0x3f) << 8) | usize::from(second);
 
@@ -278,11 +281,7 @@ fn decode_name(packet: &[u8], start: usize) -> Result<(String, usize), DnsWireEr
                 cursor += 1;
                 if length == 0 {
                     let next_offset = resume_offset.unwrap_or(cursor);
-                    if output.is_empty() {
-                        output.push('.');
-                    } else {
-                        output.push('.');
-                    }
+                    output.push('.');
                     return Ok((output, next_offset));
                 }
 
@@ -331,15 +330,17 @@ fn append_escaped_label(output: &mut String, label: &[u8]) {
 }
 
 fn read_u16(packet: &[u8], offset: usize) -> Result<u16, DnsWireError> {
+    let end = offset.checked_add(2).ok_or(DnsWireError::LengthOverflow)?;
     let bytes = packet
-        .get(offset..offset + 2)
+        .get(offset..end)
         .ok_or(DnsWireError::TruncatedHeader)?;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
 }
 
 fn read_u32(packet: &[u8], offset: usize) -> Result<u32, DnsWireError> {
+    let end = offset.checked_add(4).ok_or(DnsWireError::LengthOverflow)?;
     let bytes = packet
-        .get(offset..offset + 4)
+        .get(offset..end)
         .ok_or(DnsWireError::TruncatedRecord)?;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
@@ -488,6 +489,63 @@ mod tests {
         assert!(rewrite_resource_record_ttls(&mut packet, 17).is_err());
         assert_eq!(packet, before_rewrite);
         assert_ne!(packet, original);
+    }
+
+
+    #[test]
+    fn inserts_wire_response_and_prepares_client_copy_with_ttls() {
+        let packet = example_message();
+        let mut cache = crate::dns_cache::DnsCache::new(
+            8,
+            crate::dns_cache::DnsCachePolicy::default(),
+        )
+        .unwrap();
+
+        assert!(cache
+            .insert_dns_wire_response(packet.clone(), false, true, false, 10_000)
+            .unwrap());
+
+        let question = DnsQueryKey::new("example.com", 1).unwrap();
+        let entry = cache.lookup(&question, 10_001, false, false).unwrap().entry;
+        assert_eq!(parse_dns_message(entry.payload()).unwrap().minimum_record_ttl_secs, Some(15));
+
+        let client_response = entry.prepare_client_response().unwrap();
+        assert_eq!(
+            parse_dns_message(&client_response).unwrap().minimum_record_ttl_secs,
+            Some(17)
+        );
+        assert_eq!(parse_dns_message(&packet).unwrap().minimum_record_ttl_secs, Some(15));
+    }
+
+    #[test]
+    fn wire_cache_rejects_queries_and_truncated_responses() {
+        let mut cache = crate::dns_cache::DnsCache::new(
+            4,
+            crate::dns_cache::DnsCachePolicy::default(),
+        )
+        .unwrap();
+
+        let query = {
+            let mut packet = example_message();
+            packet[2] = 0;
+            packet[3] = 0;
+            packet
+        };
+        assert_eq!(
+            cache.insert_dns_wire_response(query, false, true, false, 1),
+            Err(crate::dns_cache::DnsWireCacheError::NotAResponse)
+        );
+
+        let truncated = {
+            let mut packet = example_message();
+            packet[2] |= 0x02;
+            packet
+        };
+        assert_eq!(
+            cache.insert_dns_wire_response(truncated, false, true, false, 1),
+            Err(crate::dns_cache::DnsWireCacheError::TruncatedResponse)
+        );
+        assert!(cache.is_empty());
     }
 
     #[test]
