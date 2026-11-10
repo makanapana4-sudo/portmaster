@@ -9,6 +9,7 @@ pub mod config;
 pub mod connection;
 pub mod driver_info;
 pub mod driver_protocol;
+pub mod driver_stream;
 pub mod error;
 pub mod event_queue;
 
@@ -23,5 +24,6 @@ pub use driver_info::{
 pub use driver_protocol::{
     parse_info_frame, DriverCommand, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
 };
+pub use driver_stream::DriverInfoStream;
 pub use error::CoreError;
 pub use event_queue::{bounded_event_queue, QueueConfigError};
