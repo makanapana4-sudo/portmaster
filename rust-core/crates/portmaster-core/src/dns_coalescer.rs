@@ -110,20 +110,25 @@ impl DnsRequestGuard {
     }
 
     fn complete(&mut self) {
-        self.flight.finish();
-
         if !self.tracked {
+            self.flight.finish();
             return;
         }
 
         let Some(registry) = self.registry.upgrade() else {
+            self.flight.finish();
+            self.tracked = false;
             return;
         };
         let Some(key) = self.key.take() else {
+            self.flight.finish();
+            self.tracked = false;
             return;
         };
 
         if let Ok(mut entries) = registry.entries.lock() {
+            self.flight.finish();
+
             let is_current = entries
                 .get(&key)
                 .is_some_and(|current| Arc::ptr_eq(current, &self.flight));
@@ -131,6 +136,8 @@ impl DnsRequestGuard {
             if is_current {
                 entries.remove(&key);
             }
+        } else {
+            self.flight.finish();
         }
 
         self.tracked = false;
@@ -301,7 +308,24 @@ impl DnsRequestCoalescer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time::Duration};
+    use std::{
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc,
+        },
+        thread,
+        time::Duration,
+    };
+
+    fn wait_for_calls(calls: &AtomicUsize, minimum: usize) {
+        for _ in 0..2_000 {
+            if calls.load(Ordering::Acquire) >= minimum {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("waiter did not reach the expected state");
+    }
 
     fn key(name: &str) -> DnsQueryKey {
         DnsQueryKey::new(name, 1).unwrap()
@@ -331,9 +355,16 @@ mod tests {
 
         let other = coalescer.clone();
         let waiter_key = request_key;
-        let waiter = thread::spawn(move || other.begin(waiter_key, || false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let waiter_calls = Arc::clone(&calls);
+        let waiter = thread::spawn(move || {
+            other.begin(waiter_key, || {
+                waiter_calls.fetch_add(1, Ordering::AcqRel);
+                false
+            })
+        });
 
-        thread::sleep(Duration::from_millis(30));
+        wait_for_calls(&calls, 2);
         drop(guard);
 
         assert!(matches!(
@@ -345,7 +376,7 @@ mod tests {
 
     #[test]
     fn timed_out_leader_can_be_superseded_without_removing_new_flight() {
-        let coalescer = DnsRequestCoalescer::new(8, Duration::from_millis(40)).unwrap();
+        let coalescer = DnsRequestCoalescer::new(8, Duration::from_millis(300)).unwrap();
         let request_key = key("slow.example");
         let DnsRequestStart::Leader(old_guard) =
             coalescer.begin(request_key.clone(), || false)
@@ -353,7 +384,7 @@ mod tests {
             panic!("first request should become leader");
         };
 
-        thread::sleep(Duration::from_millis(60));
+        thread::sleep(Duration::from_millis(350));
 
         let DnsRequestStart::Leader(new_guard) =
             coalescer.begin(request_key.clone(), || false)
@@ -365,8 +396,15 @@ mod tests {
         assert_eq!(coalescer.len(), 1);
 
         let other = coalescer.clone();
-        let waiter = thread::spawn(move || other.begin(request_key, || false));
-        thread::sleep(Duration::from_millis(20));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let waiter_calls = Arc::clone(&calls);
+        let waiter = thread::spawn(move || {
+            other.begin(request_key, || {
+                waiter_calls.fetch_add(1, Ordering::AcqRel);
+                false
+            })
+        });
+        wait_for_calls(&calls, 2);
         drop(new_guard);
 
         assert!(matches!(
@@ -386,8 +424,23 @@ mod tests {
             panic!("first request should become leader");
         };
 
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let other = coalescer.clone();
+        let waiter_cancelled = Arc::clone(&cancelled);
+        let waiter_calls = Arc::clone(&calls);
+        let waiter = thread::spawn(move || {
+            other.begin(request_key, || {
+                waiter_calls.fetch_add(1, Ordering::AcqRel);
+                waiter_cancelled.load(Ordering::Acquire)
+            })
+        });
+
+        wait_for_calls(&calls, 2);
+        cancelled.store(true, Ordering::Release);
+
         assert!(matches!(
-            coalescer.begin(request_key, || true),
+            waiter.join().unwrap(),
             DnsRequestStart::Cancelled
         ));
         assert_eq!(coalescer.len(), 1);
