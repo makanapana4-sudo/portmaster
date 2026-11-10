@@ -658,10 +658,7 @@ mod tests {
                     assert_eq!(connection.local_port, 5);
                     assert_eq!(connection.remote_port, 6);
                     assert_eq!(connection.payload_layer, 7);
-                    assert_eq!(
-                        connection.packet_payload,
-                        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                    );
+                    assert_eq!(connection.packet_payload, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
                 }
                 DriverInfo::ConnectionEndV4(end) => {
                     assert_eq!(end.process_id, 1);
@@ -734,7 +731,9 @@ mod tests {
                         Some(BandwidthValueV6 {
                             local_address: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
                             local_port: 5,
-                            remote_address: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+                            remote_address: [
+                                2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17
+                            ],
                             remote_port: 6,
                             transmitted_bytes: 7,
                             received_bytes: 8,

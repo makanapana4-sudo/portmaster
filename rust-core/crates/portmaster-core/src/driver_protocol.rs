@@ -204,10 +204,7 @@ impl DriverCommand {
     /// Encodes the command into an existing slice without allocating.
     ///
     /// The destination is not modified when it is too small.
-    pub fn encode_to_slice(
-        &self,
-        output: &mut [u8],
-    ) -> Result<usize, CommandEncodeError> {
+    pub fn encode_to_slice(&self, output: &mut [u8]) -> Result<usize, CommandEncodeError> {
         let length = self.encoded_len();
         if output.len() < length {
             return Err(CommandEncodeError {
@@ -498,7 +495,6 @@ mod tests {
         assert!(counts[0..7].iter().all(|count| *count > 0));
         assert!(counts[8] > 0);
     }
-
 
     #[test]
     fn encodes_into_a_stack_slice() {

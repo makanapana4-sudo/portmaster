@@ -22,8 +22,8 @@ pub use driver_info::{
     ConnectionInfoV6, DriverInfo,
 };
 pub use driver_protocol::{
-    CommandEncodeError,
-    parse_info_frame, DriverCommand, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
+    parse_info_frame, CommandEncodeError, DriverCommand, InfoFrame, InfoKind, ProtocolError,
+    DEFAULT_MAX_INFO_PAYLOAD,
 };
 pub use driver_stream::DriverInfoStream;
 pub use error::CoreError;
