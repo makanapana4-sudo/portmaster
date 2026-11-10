@@ -8,6 +8,7 @@ on:
       - 'runtime/**'
       - 'service/**'
       - 'spn/**'
+      - 'windows_kext/**'
     branches:
       - main
       - development
@@ -21,6 +22,7 @@ on:
       - 'runtime/**'
       - 'service/**'
       - 'spn/**'
+      - 'windows_kext/**'
     branches:
       - main
       - development
