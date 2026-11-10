@@ -157,7 +157,7 @@ impl DnsQueryKey {
             lower
         } else {
             format!("{lower}.")
-        }
+        };
 
         Ok(Self {
             name: normalized,
