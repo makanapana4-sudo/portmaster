@@ -67,7 +67,11 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
     }
 
     pub fn get(&mut self, key: &K) -> Option<&V> {
-        if self.entries.get(key).is_some_and(|entry| entry.expires_at <= Instant::now()) {
+        if self
+            .entries
+            .get(key)
+            .is_some_and(|entry| entry.expires_at <= Instant::now())
+        {
             self.entries.remove(key);
             self.compact();
             return None;
@@ -91,9 +95,17 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
         }
 
         let generation = self.generation;
-        let expires_at = now.checked_add(self.ttl)
+        let expires_at = now
+            .checked_add(self.ttl)
             .expect("TTL was validated when the cache was created");
-        self.entries.insert(key.clone(), Entry { value, expires_at, generation });
+        self.entries.insert(
+            key.clone(),
+            Entry {
+                value,
+                expires_at,
+                generation,
+            },
+        );
         self.order.push_back((key, generation));
         self.compact();
 
@@ -132,8 +144,13 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
     fn purge_expired_at(&mut self, now: Instant) -> usize {
         let mut removed = 0;
         loop {
-            let Some((key, generation)) = self.order.front() else { break };
-            let state = self.entries.get(key).map(|entry| (entry.generation, entry.expires_at));
+            let Some((key, generation)) = self.order.front() else {
+                break;
+            };
+            let state = self
+                .entries
+                .get(key)
+                .map(|entry| (entry.generation, entry.expires_at));
             match state {
                 Some((current, expiry)) if current == *generation && expiry > now => break,
                 Some((current, _)) if current == *generation => {
@@ -141,7 +158,9 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
                     self.entries.remove(&key);
                     removed += 1;
                 }
-                _ => { self.order.pop_front(); }
+                _ => {
+                    self.order.pop_front();
+                }
             }
         }
         self.compact();
@@ -150,7 +169,11 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
 
     fn evict_oldest(&mut self) {
         while let Some((key, generation)) = self.order.pop_front() {
-            if self.entries.get(&key).is_some_and(|entry| entry.generation == generation) {
+            if self
+                .entries
+                .get(&key)
+                .is_some_and(|entry| entry.generation == generation)
+            {
                 self.entries.remove(&key);
                 break;
             }
@@ -162,7 +185,9 @@ impl<K: Clone + Eq + Hash, V> BoundedTtlCache<K, V> {
             return;
         }
         self.order.retain(|(key, generation)| {
-            self.entries.get(key).is_some_and(|entry| entry.generation == *generation)
+            self.entries
+                .get(key)
+                .is_some_and(|entry| entry.generation == *generation)
         });
     }
 }
@@ -173,10 +198,14 @@ mod tests {
 
     #[test]
     fn rejects_zero_capacity_and_ttl() {
-        assert_eq!(BoundedTtlCache::<u8, u8>::new(0, Duration::from_secs(1)).err(),
-            Some(CacheConfigError::ZeroCapacity));
-        assert_eq!(BoundedTtlCache::<u8, u8>::new(1, Duration::ZERO).err(),
-            Some(CacheConfigError::ZeroTtl));
+        assert_eq!(
+            BoundedTtlCache::<u8, u8>::new(0, Duration::from_secs(1)).err(),
+            Some(CacheConfigError::ZeroCapacity)
+        );
+        assert_eq!(
+            BoundedTtlCache::<u8, u8>::new(1, Duration::ZERO).err(),
+            Some(CacheConfigError::ZeroTtl)
+        );
     }
 
     #[test]
