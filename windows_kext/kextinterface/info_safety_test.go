@@ -77,3 +77,98 @@ func TestBandwidthWireSizesMatchDecodedTypes(t *testing.T) {
 		t.Fatalf("IPv6 bandwidth size changed: got %d, want %d", got, bandwidthValueV6Size)
 	}
 }
+
+func TestFixedWireSizesMatchGoTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"connection v4", binary.Size(connectionV4Internal{}), 31},
+		{"connection v6", binary.Size(connectionV6Internal{}), 55},
+		{"connection end v4", binary.Size(ConnectionEndV4{}), 22},
+		{"connection end v6", binary.Size(ConnectionEndV6{}), 46},
+		{"bandwidth v4", binary.Size(BandwidthValueV4{}), bandwidthValueV4Size},
+		{"bandwidth v6", binary.Size(BandwidthValueV6{}), bandwidthValueV6Size},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.got != test.want {
+				t.Fatalf("wire size mismatch: got %d, want %d", test.got, test.want)
+			}
+		})
+	}
+}
+
+func TestRecvInfoDecodesFixedConnectionFields(t *testing.T) {
+	v4Payload := make([]byte, 31+4+2)
+	binary.LittleEndian.PutUint64(v4Payload[0:8], 100)
+	binary.LittleEndian.PutUint64(v4Payload[8:16], 200)
+	v4Payload[16] = 1
+	v4Payload[17] = 6
+	copy(v4Payload[18:22], []byte{10, 0, 0, 1})
+	copy(v4Payload[22:26], []byte{1, 1, 1, 1})
+	binary.LittleEndian.PutUint16(v4Payload[26:28], 1234)
+	binary.LittleEndian.PutUint16(v4Payload[28:30], 443)
+	v4Payload[30] = 2
+	binary.LittleEndian.PutUint32(v4Payload[31:35], 2)
+	copy(v4Payload[35:], []byte{7, 8})
+
+	v4Info, err := RecvInfo(bytes.NewReader(makeInfoFrame(InfoConnectionIpv4, v4Payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v4Info.ConnectionV4 == nil {
+		t.Fatal("expected an IPv4 connection")
+	}
+	wantV4 := connectionV4Internal{
+		ID:           100,
+		ProcessID:    200,
+		Direction:    1,
+		Protocol:     6,
+		LocalIP:      [4]byte{10, 0, 0, 1},
+		RemoteIP:     [4]byte{1, 1, 1, 1},
+		LocalPort:    1234,
+		RemotePort:   443,
+		PayloadLayer: 2,
+	}
+	if v4Info.ConnectionV4.connectionV4Internal != wantV4 {
+		t.Fatalf("IPv4 fields differ: got %+v, want %+v", v4Info.ConnectionV4.connectionV4Internal, wantV4)
+	}
+	if !bytes.Equal(v4Info.ConnectionV4.Payload, []byte{7, 8}) {
+		t.Fatalf("unexpected IPv4 payload: %v", v4Info.ConnectionV4.Payload)
+	}
+
+	v6Payload := make([]byte, 55+4+1)
+	binary.LittleEndian.PutUint64(v6Payload[0:8], 300)
+	binary.LittleEndian.PutUint64(v6Payload[8:16], 400)
+	v6Payload[16] = 0
+	v6Payload[17] = 17
+	copy(v6Payload[18:34], []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+	copy(v6Payload[34:50], []byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1})
+	binary.LittleEndian.PutUint16(v6Payload[50:52], 5353)
+	binary.LittleEndian.PutUint16(v6Payload[52:54], 443)
+	v6Payload[54] = 3
+	binary.LittleEndian.PutUint32(v6Payload[55:59], 1)
+	v6Payload[59] = 9
+
+	v6Info, err := RecvInfo(bytes.NewReader(makeInfoFrame(InfoConnectionIpv6, v6Payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v6Info.ConnectionV6 == nil {
+		t.Fatal("expected an IPv6 connection")
+	}
+	if v6Info.ConnectionV6.ID != 300 ||
+		v6Info.ConnectionV6.ProcessID != 400 ||
+		v6Info.ConnectionV6.Protocol != 17 ||
+		v6Info.ConnectionV6.LocalPort != 5353 ||
+		v6Info.ConnectionV6.RemotePort != 443 ||
+		v6Info.ConnectionV6.PayloadLayer != 3 {
+		t.Fatalf("unexpected IPv6 connection fields: %+v", v6Info.ConnectionV6)
+	}
+	if !bytes.Equal(v6Info.ConnectionV6.Payload, []byte{9}) {
+		t.Fatalf("unexpected IPv6 payload: %v", v6Info.ConnectionV6.Payload)
+	}
+}
