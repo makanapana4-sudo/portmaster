@@ -5,6 +5,7 @@ This directory is an incremental Rust implementation area for selected Portmaste
 The workspace now contains reusable building blocks:
 - connection identity types for TCP and UDP;
 - validated core resource-limit configuration;
+- a DNS response cache with Portmaster-compatible TTL, negative-response, stale-answer and refresh-window policies, plus count and byte limits;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
 - safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and a generic transport adapter for the existing Windows driver protocol;
@@ -39,6 +40,7 @@ rust-core/
         cache.rs
         config.rs
         connection.rs
+        dns_cache.rs
         driver_info.rs
         driver_protocol.rs
         driver_stream.rs
@@ -51,6 +53,7 @@ rust-core/
 
 - Keep this core isolated from the live networking stack during early development.
 - Validate configuration and resource limits before starting work.
+- Keep the DNS cache separate from DNS message parsing, resolver selection, upstream transport, and response filtering until those pieces have their own parity tests.
 - Keep unsafe Rust forbidden in this platform-independent crate.
 - Bound queues and caches; define backpressure behavior instead of silently dropping events.
 - Parse driver frames with size checks, decode all current event kinds, and borrow packet payloads and bandwidth records instead of copying them.

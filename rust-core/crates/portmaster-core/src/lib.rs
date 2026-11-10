@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod config;
 pub mod connection;
+pub mod dns_cache;
 pub mod driver_info;
 pub mod driver_protocol;
 pub mod driver_stream;
@@ -17,6 +18,11 @@ pub mod event_queue;
 pub use cache::{BoundedTtlCache, CacheConfigError};
 pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
+pub use dns_cache::{
+    DnsCache, DnsCacheConfigError, DnsCacheEntry, DnsCacheLookup, DnsCacheLookupKind,
+    DnsCachePolicy, DnsQueryKey, DnsResponseMetadata, DNS_RCODE_NAME_ERROR,
+    DNS_RCODE_REFUSED, DNS_RCODE_SUCCESS,
+};
 pub use driver_info::{
     parse_driver_info, parse_driver_info_frame, BandwidthStatsV4, BandwidthStatsV6,
     BandwidthValueV4, BandwidthValueV6, ConnectionEndV4, ConnectionEndV6, ConnectionInfoV4,

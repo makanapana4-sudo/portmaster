@@ -79,3 +79,11 @@ The Rust core now has a generic driver transport adapter that connects command w
 
 
 The decoder benchmarks now include reference cases that reproduce the previous reflection-based Go implementation using binary.Read for connection records and one call per bandwidth record. Compare the matching fixed-decoder and BinaryReadBaseline cases. The benchmark sinks keep the decoded output reachable so the compiler cannot remove the work.
+
+## DNS cache policy foundation
+
+The Rust core now contains a bounded DNS response cache policy model. Its default TTL precedence mirrors the current resolver defaults: non-success RCodes use 10 seconds; connectivity domains use 3 seconds; successful empty answers use 60 seconds; offline answers use 60 seconds; ordinary successful records use the minimum TTL across response sections, floored at 60 seconds and capped at 24 hours. It also exposes the 17-second resource-record TTL value used when replies are served to clients.
+
+The cache models successful, refresh-soon, stale-success, and expired-backup lookup states, and only stores success, NXDOMAIN, and REFUSED responses. It is bounded by entry count, a 65,535-byte per-response default, and a 32 MiB total payload budget.
+
+This is only the cache lifecycle and policy layer. It does not yet parse DNS wire messages, implement resolver selection/compliance, persist NameRecords, perform DoH/DoT, or apply per-process filtering. No latency or memory reduction is claimed until the cache is connected to actual DNS traffic and measured against the Go implementation.
