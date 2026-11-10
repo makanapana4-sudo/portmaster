@@ -68,3 +68,5 @@ go test ./windows_kext/kextinterface -run '^$' -bench='(Command|RecvInfo)' -benc
 ```
 
 The new fixed-offset decoder is intentionally benchmarked separately for a small IPv4 connection event and a 128-record bandwidth event. Compare against the pre-change build on the same Go version; do not infer whole-service savings from these isolated benchmarks.
+
+The Rust core now has a generic driver transport adapter that connects command writes to incremental event reads. Its read path uses a fixed 16 KiB buffer, retries interrupted reads, reports nonblocking WouldBlock separately from EOF, and delegates framing to the bounded stream decoder. Its command path uses the fixed 39-byte stack encoder and Write::write_all. This adapter is platform-neutral; it deliberately does not open the Windows device or install/load a driver.

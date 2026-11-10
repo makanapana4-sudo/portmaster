@@ -7,7 +7,7 @@ The workspace now contains reusable building blocks:
 - validated core resource-limit configuration;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
-- safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and command encoding for the existing Windows driver protocol;
+- safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and a generic transport adapter for the existing Windows driver protocol;
 - shared error types.
 
 These components are not yet connected to the running Portmaster service. The existing Go implementation remains authoritative and must not be removed or bypassed until migrated features demonstrate behavior parity, security equivalence, and measured performance improvements.
@@ -42,6 +42,7 @@ rust-core/
         driver_info.rs
         driver_protocol.rs
         driver_stream.rs
+        driver_transport.rs
         error.rs
         event_queue.rs
 ```
@@ -53,6 +54,7 @@ rust-core/
 - Keep unsafe Rust forbidden in this platform-independent crate.
 - Bound queues and caches; define backpressure behavior instead of silently dropping events.
 - Parse driver frames with size checks, decode all current event kinds, and borrow packet payloads and bandwidth records instead of copying them.
+- Keep the platform-neutral transport generic over Read and Write until the Windows handle lifecycle and synchronization have been designed and tested.
 - Keep incomplete stream frames in a bounded buffer and process multiple complete frames in one read.
 - Encode driver commands into reusable buffers to avoid repeated allocations.
 - Avoid unnecessary dependencies and background threads.
