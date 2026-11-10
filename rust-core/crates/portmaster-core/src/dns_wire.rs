@@ -6,6 +6,7 @@ pub const DNS_HEADER_SIZE: usize = 12;
 
 const MAX_DNS_NAME_WIRE_LENGTH: usize = 255;
 const MAX_COMPRESSION_JUMPS: usize = 128;
+pub const DNS_TYPE_OPT: u16 = 41;
 
 /// Errors returned while parsing DNS wire messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,10 @@ pub enum DnsWireError {
     OpcodeMismatch,
     QuestionMismatch,
     InvalidQuestionCount,
+    InvalidDomainName,
+    LabelTooLong,
+    InvalidUdpPayloadSize,
+    DnssecOkRequiresEdns,
 }
 
 impl std::fmt::Display for DnsWireError {
@@ -51,6 +56,10 @@ impl std::fmt::Display for DnsWireError {
             Self::OpcodeMismatch => formatter.write_str("DNS response opcode does not match the request"),
             Self::QuestionMismatch => formatter.write_str("DNS response question does not match the request"),
             Self::InvalidQuestionCount => formatter.write_str("DNS request and response must each contain one question"),
+            Self::InvalidDomainName => formatter.write_str("DNS query name is not a valid ASCII domain name"),
+            Self::LabelTooLong => formatter.write_str("DNS query label exceeds 63 bytes"),
+            Self::InvalidUdpPayloadSize => formatter.write_str("EDNS UDP payload size must be at least 512 bytes"),
+            Self::DnssecOkRequiresEdns => formatter.write_str("DNSSEC OK requires an EDNS OPT record"),
         }
     }
 }
@@ -70,6 +79,9 @@ impl DnsQuestion {
         DnsQueryKey::new(&self.name, self.record_type)
     }
 }
+
+/// Maximum DNS label length in wire format.
+pub const MAX_DNS_LABEL_LENGTH: usize = 63;
 
 /// Parsed DNS header, first question, section counts and minimum record TTL.
 ///
@@ -167,10 +179,12 @@ pub fn parse_dns_message(packet: &[u8]) -> Result<DnsMessageMetadata, DnsWireErr
     let mut minimum_record_ttl_secs = None;
     for _ in 0..record_count {
         let record = parse_record(packet, offset)?;
-        minimum_record_ttl_secs = Some(
-            minimum_record_ttl_secs
-                .map_or(record.ttl_secs, |current: u32| current.min(record.ttl_secs)),
-        );
+        if record.record_type != DNS_TYPE_OPT {
+            minimum_record_ttl_secs = Some(
+                minimum_record_ttl_secs
+                    .map_or(record.ttl_secs, |current: u32| current.min(record.ttl_secs)),
+            );
+        }
         offset = record.next_offset;
     }
 
@@ -247,7 +261,9 @@ pub fn rewrite_resource_record_ttls(
 
     for _ in 0..record_count {
         let record = parse_record(packet, offset)?;
-        packet[record.ttl_offset..record.ttl_offset + 4].copy_from_slice(&ttl_bytes);
+        if record.record_type != DNS_TYPE_OPT {
+            packet[record.ttl_offset..record.ttl_offset + 4].copy_from_slice(&ttl_bytes);
+        }
         offset = record.next_offset;
     }
 
@@ -255,6 +271,7 @@ pub fn rewrite_resource_record_ttls(
 }
 
 struct ParsedRecord {
+    record_type: u16,
     ttl_secs: u32,
     ttl_offset: usize,
     next_offset: usize,
@@ -269,6 +286,7 @@ fn parse_record(packet: &[u8], start: usize) -> Result<ParsedRecord, DnsWireErro
         return Err(DnsWireError::TruncatedRecord);
     }
 
+    let record_type = read_u16(packet, name_end)?;
     let ttl_offset = name_end + 4;
     let ttl_secs = read_u32(packet, ttl_offset)?;
     let data_length = usize::from(read_u16(packet, name_end + 8)?);
@@ -281,6 +299,7 @@ fn parse_record(packet: &[u8], start: usize) -> Result<ParsedRecord, DnsWireErro
     }
 
     Ok(ParsedRecord {
+        record_type,
         ttl_secs,
         ttl_offset,
         next_offset,
@@ -539,6 +558,29 @@ mod tests {
         let count = rewrite_resource_record_ttls(&mut packet, 17).unwrap();
 
         assert_eq!(count, 3);
+        assert_eq!(parse_dns_message(&packet).unwrap().minimum_record_ttl_secs, Some(17));
+    }
+
+    #[test]
+    fn excludes_edns_opt_pseudo_record_from_ttl_minimum_and_rewrite() {
+        let mut packet = example_message();
+        packet[10..12].copy_from_slice(&2_u16.to_be_bytes());
+
+        packet.push(0);
+        push_u16(&mut packet, DNS_TYPE_OPT);
+        push_u16(&mut packet, 1232);
+        packet.extend_from_slice(&[0, 0, 0x80, 0]);
+        push_u16(&mut packet, 0);
+
+        let metadata = parse_dns_message(&packet).unwrap();
+        assert_eq!(metadata.additional_count, 2);
+        assert_eq!(metadata.minimum_record_ttl_secs, Some(15));
+
+        let opt_ttl_offset = packet.len() - 6;
+        assert_eq!(&packet[opt_ttl_offset..opt_ttl_offset + 4], &[0, 0, 0x80, 0]);
+
+        assert_eq!(rewrite_resource_record_ttls(&mut packet, 17).unwrap(), 3);
+        assert_eq!(&packet[opt_ttl_offset..opt_ttl_offset + 4], &[0, 0, 0x80, 0]);
         assert_eq!(parse_dns_message(&packet).unwrap().minimum_record_ttl_secs, Some(17));
     }
 

@@ -7,7 +7,7 @@ The workspace now contains reusable building blocks:
 - validated core resource-limit configuration;
 - a DNS response cache with Portmaster-compatible TTL, negative-response, stale-answer and refresh-window policies, plus count and byte limits;
 - a bounded single-flight DNS request coordinator with cancellation, timeout recovery and safe leader replacement;
-- a DNS wire parser for compressed names, question/resource-record boundaries, minimum TTL extraction and safe in-place TTL rewriting, with upstream response-to-query validation;
+- a DNS wire parser and query builder, including compressed-name validation, EDNS support, minimum TTL extraction, upstream response matching and safe TTL rewriting;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
 - safe framing, typed decoding of all seven driver event kinds, bounded incremental stream decoding, and a generic transport adapter for the existing Windows driver protocol;
@@ -45,6 +45,7 @@ rust-core/
         dns_cache.rs
         dns_coalescer.rs
         dns_wire.rs
+        dns_query.rs
         driver_info.rs
         driver_protocol.rs
         driver_stream.rs

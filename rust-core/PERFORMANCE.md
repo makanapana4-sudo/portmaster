@@ -103,3 +103,5 @@ Client responses can be prepared by cloning the cached bytes once and rewriting 
 This still does not implement upstream resolver selection, UDP/TCP/DoH/DoT sockets, DNSSEC validation, query compliance, or filtering. Those need their own behavior-parity tests before the new parser is used in live traffic.
 
 The raw-response insertion path also has a query-bound variant. Before caching, it verifies the response bit, transaction ID, opcode, and normalized question name/type/class against the original request. This is intended to prevent an upstream mismatch from populating the cache under the wrong question; upstream transport authentication and DNSSEC validation remain separate layers.
+
+The DNS wire layer can now construct recursive IN-class queries with optional EDNS0 and the DNSSEC-OK flag. The caller supplies the transaction ID; generating unpredictable IDs remains the responsibility of the platform/upstream transport integration. EDNS OPT pseudo-records are excluded from TTL calculation and rewriting because their TTL field carries EDNS metadata rather than an RR lifetime.
