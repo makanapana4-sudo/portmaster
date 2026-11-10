@@ -520,6 +520,67 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ipv6_bandwidth_records() {
+        let mut bytes = Vec::new();
+        bytes.push(17);
+        push_u32(&mut bytes, 1);
+        bytes.extend_from_slice(&[1; 16]);
+        push_u16(&mut bytes, 5353);
+        bytes.extend_from_slice(&[2; 16]);
+        push_u16(&mut bytes, 443);
+        push_u64(&mut bytes, 300);
+        push_u64(&mut bytes, 400);
+
+        let parsed = parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)).unwrap();
+        let DriverInfo::BandwidthV6(stats) = parsed else {
+            panic!("expected IPv6 bandwidth stats");
+        };
+
+        assert_eq!(stats.protocol, 17);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(
+            stats.get(0),
+            Some(BandwidthValueV6 {
+                local_address: [1; 16],
+                local_port: 5353,
+                remote_address: [2; 16],
+                remote_port: 443,
+                transmitted_bytes: 300,
+                received_bytes: 400,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_and_decodes_a_complete_frame_with_default_limit() {
+        let bytes = [InfoKind::LogLine as u8, 2, 0, 0, 0, 3, b'o'];
+
+        let (parsed, consumed) = parse_driver_info_frame(&bytes).unwrap();
+        let DriverInfo::LogLine { severity, message } = parsed else {
+            panic!("expected log line");
+        };
+
+        assert_eq!(severity, 3);
+        assert_eq!(message, b"o");
+        assert_eq!(consumed, bytes.len());
+    }
+
+    #[test]
+    fn default_frame_parser_rejects_oversized_payloads() {
+        let mut header = [0; 5];
+        header[0] = InfoKind::LogLine as u8;
+        header[1..5].copy_from_slice(&((DEFAULT_MAX_INFO_PAYLOAD as u32) + 1).to_le_bytes());
+
+        assert_eq!(
+            parse_driver_info_frame(&header).err(),
+            Some(ProtocolError::PayloadTooLarge {
+                length: DEFAULT_MAX_INFO_PAYLOAD + 1,
+                maximum: DEFAULT_MAX_INFO_PAYLOAD,
+            })
+        );
+    }
+
+    #[test]
     fn rejects_bandwidth_count_that_exceeds_the_frame() {
         let bytes = [6, 0xff, 0xff, 0xff, 0xff];
         assert!(matches!(
