@@ -31,6 +31,9 @@ pub enum DnsWireError {
     LabelTooLong,
     InvalidUdpPayloadSize,
     DnssecOkRequiresEdns,
+    InvalidOptRecord,
+    DuplicateOptRecord,
+    OptOutsideAdditionalSection,
 }
 
 impl std::fmt::Display for DnsWireError {
@@ -60,6 +63,9 @@ impl std::fmt::Display for DnsWireError {
             Self::LabelTooLong => formatter.write_str("DNS query label exceeds 63 bytes"),
             Self::InvalidUdpPayloadSize => formatter.write_str("EDNS UDP payload size must be at least 512 bytes"),
             Self::DnssecOkRequiresEdns => formatter.write_str("DNSSEC OK requires an EDNS OPT record"),
+            Self::InvalidOptRecord => formatter.write_str("EDNS OPT record is malformed"),
+            Self::DuplicateOptRecord => formatter.write_str("DNS message contains more than one EDNS OPT record"),
+            Self::OptOutsideAdditionalSection => formatter.write_str("EDNS OPT record is outside the additional section"),
         }
     }
 }
@@ -171,20 +177,45 @@ pub fn parse_dns_message(packet: &[u8]) -> Result<DnsMessageMetadata, DnsWireErr
         offset = question_end;
     }
 
-    let record_count = answer_count
-        .checked_add(authority_count)
-        .and_then(|count| count.checked_add(additional_count))
-        .ok_or(DnsWireError::LengthOverflow)?;
-
     let mut minimum_record_ttl_secs = None;
-    for _ in 0..record_count {
+    let mut opt_seen = false;
+
+    for _ in 0..answer_count + authority_count {
         let record = parse_record(packet, offset)?;
-        if record.record_type != DNS_TYPE_OPT {
+        if record.record_type == DNS_TYPE_OPT {
+            return Err(DnsWireError::OptOutsideAdditionalSection);
+        }
+
+        minimum_record_ttl_secs = Some(
+            minimum_record_ttl_secs
+                .map_or(record.ttl_secs, |current: u32| current.min(record.ttl_secs)),
+        );
+        offset = record.next_offset;
+    }
+
+    for _ in 0..additional_count {
+        let record = parse_record(packet, offset)?;
+        if record.record_type == DNS_TYPE_OPT {
+            if opt_seen {
+                return Err(DnsWireError::DuplicateOptRecord);
+            }
+            opt_seen = true;
+
+            if record.owner_name != "." {
+                return Err(DnsWireError::InvalidOptRecord);
+            }
+            validate_edns_options(
+                packet,
+                record.rdata_offset,
+                record.rdata_length,
+            )?;
+        } else {
             minimum_record_ttl_secs = Some(
                 minimum_record_ttl_secs
                     .map_or(record.ttl_secs, |current: u32| current.min(record.ttl_secs)),
             );
         }
+
         offset = record.next_offset;
     }
 
@@ -258,27 +289,32 @@ pub fn rewrite_resource_record_ttls(
         + metadata.authority_count
         + metadata.additional_count;
     let ttl_bytes = ttl_secs.to_be_bytes();
+    let mut rewritten = 0;
 
     for _ in 0..record_count {
         let record = parse_record(packet, offset)?;
         if record.record_type != DNS_TYPE_OPT {
             packet[record.ttl_offset..record.ttl_offset + 4].copy_from_slice(&ttl_bytes);
+            rewritten += 1;
         }
         offset = record.next_offset;
     }
 
-    Ok(record_count)
+    Ok(rewritten)
 }
 
 struct ParsedRecord {
+    owner_name: String,
     record_type: u16,
     ttl_secs: u32,
     ttl_offset: usize,
+    rdata_offset: usize,
+    rdata_length: usize,
     next_offset: usize,
 }
 
 fn parse_record(packet: &[u8], start: usize) -> Result<ParsedRecord, DnsWireError> {
-    let (_, name_end) = decode_name(packet, start)?;
+    let (owner_name, name_end) = decode_name(packet, start)?;
     let fixed_end = name_end
         .checked_add(10)
         .ok_or(DnsWireError::LengthOverflow)?;
@@ -290,6 +326,7 @@ fn parse_record(packet: &[u8], start: usize) -> Result<ParsedRecord, DnsWireErro
     let ttl_offset = name_end + 4;
     let ttl_secs = read_u32(packet, ttl_offset)?;
     let data_length = usize::from(read_u16(packet, name_end + 8)?);
+    let rdata_offset = fixed_end;
     let next_offset = fixed_end
         .checked_add(data_length)
         .ok_or(DnsWireError::LengthOverflow)?;
@@ -299,11 +336,47 @@ fn parse_record(packet: &[u8], start: usize) -> Result<ParsedRecord, DnsWireErro
     }
 
     Ok(ParsedRecord {
+        owner_name,
         record_type,
         ttl_secs,
         ttl_offset,
+        rdata_offset,
+        rdata_length: data_length,
         next_offset,
     })
+}
+
+fn validate_edns_options(
+    packet: &[u8],
+    mut offset: usize,
+    length: usize,
+) -> Result<(), DnsWireError> {
+    let end = offset
+        .checked_add(length)
+        .ok_or(DnsWireError::LengthOverflow)?;
+    if end > packet.len() {
+        return Err(DnsWireError::InvalidOptRecord);
+    }
+
+    while offset < end {
+        let header_end = offset
+            .checked_add(4)
+            .ok_or(DnsWireError::LengthOverflow)?;
+        if header_end > end {
+            return Err(DnsWireError::InvalidOptRecord);
+        }
+
+        let option_length = usize::from(read_u16(packet, offset + 2)?);
+        offset = header_end
+            .checked_add(option_length)
+            .ok_or(DnsWireError::LengthOverflow)?;
+
+        if offset > end {
+            return Err(DnsWireError::InvalidOptRecord);
+        }
+    }
+
+    Ok(())
 }
 
 fn decode_name(packet: &[u8], start: usize) -> Result<(String, usize), DnsWireError> {
@@ -579,9 +652,65 @@ mod tests {
         let opt_ttl_offset = packet.len() - 6;
         assert_eq!(&packet[opt_ttl_offset..opt_ttl_offset + 4], &[0, 0, 0x80, 0]);
 
-        assert_eq!(rewrite_resource_record_ttls(&mut packet, 17).unwrap(), 3);
+        assert_eq!(rewrite_resource_record_ttls(&mut packet, 17).unwrap(), 2);
         assert_eq!(&packet[opt_ttl_offset..opt_ttl_offset + 4], &[0, 0, 0x80, 0]);
         assert_eq!(parse_dns_message(&packet).unwrap().minimum_record_ttl_secs, Some(17));
+    }
+
+    #[test]
+    fn rejects_duplicate_edns_opt_records() {
+        let mut packet = example_message();
+        packet[10..12].copy_from_slice(&3_u16.to_be_bytes());
+
+        for _ in 0..2 {
+            packet.push(0);
+            push_u16(&mut packet, DNS_TYPE_OPT);
+            push_u16(&mut packet, 1232);
+            push_u32(&mut packet, 0);
+            push_u16(&mut packet, 0);
+        }
+
+        assert_eq!(
+            parse_dns_message(&packet).err(),
+            Some(DnsWireError::DuplicateOptRecord)
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_edns_option_length() {
+        let mut packet = example_message();
+        packet[10..12].copy_from_slice(&2_u16.to_be_bytes());
+
+        packet.push(0);
+        push_u16(&mut packet, DNS_TYPE_OPT);
+        push_u16(&mut packet, 1232);
+        push_u32(&mut packet, 0);
+        push_u16(&mut packet, 4);
+        push_u16(&mut packet, 10);
+        push_u16(&mut packet, 4);
+        packet.extend_from_slice(&[1, 2]);
+
+        assert_eq!(
+            parse_dns_message(&packet).err(),
+            Some(DnsWireError::InvalidOptRecord)
+        );
+    }
+
+    #[test]
+    fn rejects_opt_record_in_answer_section() {
+        let mut packet = example_message();
+        packet[6..8].copy_from_slice(&2_u16.to_be_bytes());
+
+        packet.push(0);
+        push_u16(&mut packet, DNS_TYPE_OPT);
+        push_u16(&mut packet, 1232);
+        push_u32(&mut packet, 0);
+        push_u16(&mut packet, 0);
+
+        assert_eq!(
+            parse_dns_message(&packet).err(),
+            Some(DnsWireError::OptOutsideAdditionalSection)
+        );
     }
 
     #[test]
