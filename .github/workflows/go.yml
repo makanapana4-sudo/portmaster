@@ -9,6 +9,7 @@ on:
       - 'service/**'
       - 'spn/**'
       - 'windows_kext/**'
+      - '.github/workflows/go.yml'
     branches:
       - main
       - development
@@ -23,6 +24,7 @@ on:
       - 'service/**'
       - 'spn/**'
       - 'windows_kext/**'
+      - '.github/workflows/go.yml'
     branches:
       - main
       - development
@@ -53,27 +55,11 @@ jobs:
     - name: Test Windows driver protocol interface
       run: go test ./windows_kext/kextinterface
 
-    - name: Benchmark Windows driver protocol interface
-      run: go test ./windows_kext/kextinterface -run '^
-  test:
-    name: Test & Build
-    runs-on: ubuntu-latest
-    steps:
-    - uses: earthly/actions-setup@43211c7a0eae5344d6d79fb4aaf209c8f8866203 # v1
-      with:
-        version: v0.8.0
-    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+    - name: Benchmark driver command serialization
+      run: go test ./windows_kext/kextinterface -run="^$" -bench=Command -benchmem -count=3
 
-    - name: Log in to the Container registry
-      uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Run Go Tests & Build
-      run: earthly --ci --remote-cache=ghcr.io/safing/build-cache --push +go-ci
- -bench='(Command|RecvInfo)' -benchmem -count=3
+    - name: Benchmark driver event decoding
+      run: go test ./windows_kext/kextinterface -run="^$" -bench=RecvInfo -benchmem -count=3
 
     - name: Run go vet
       run: go vet ./...
