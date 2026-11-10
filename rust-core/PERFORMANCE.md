@@ -39,3 +39,9 @@ The sampler does not measure application readiness or cold-start duration. Measu
 A language rewrite is not evidence by itself of lower resource use. Improvements depend on which code paths move, data structures, allocations, I/O, concurrency, logging, and compatibility layers. The existing Go service remains authoritative until migrated behavior passes feature and security tests.
 
 Do not publish percentage improvements until repeatable measurements are available. A lower idle memory footprint is a target, not a measured result.
+
+## Small production-path optimization included
+
+The Go Windows driver command writer now serializes verdict, IPv4 update, and IPv6 update messages into fixed-size byte arrays rather than passing structs through `encoding/binary.Write`. This removes reflection-based struct serialization from those calls and reuses fixed-size stack-shaped buffers in the source code. The writer also handles partial writes and reports a zero-byte write as `io.ErrShortWrite`.
+
+The change is protocol-preserving and has byte-layout and short-write tests. It affects driver control messages, not every packet, DNS lookup, or application startup. No allocation benchmark or end-to-end CPU saving has been measured yet, so do not extrapolate it into an overall Portmaster percentage.
