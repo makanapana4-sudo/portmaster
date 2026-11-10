@@ -606,7 +606,14 @@ mod tests {
         .unwrap();
 
         assert!(cache
-            .insert_dns_wire_response(packet.clone(), false, true, false, 10_000)
+            .insert_dns_response_for_query(
+                &example_query(),
+                packet.clone(),
+                false,
+                true,
+                false,
+                10_000,
+            )
             .unwrap());
 
         let question = DnsQueryKey::new("example.com", 1).unwrap();
@@ -622,31 +629,41 @@ mod tests {
     }
 
     #[test]
-    fn wire_cache_rejects_queries_and_truncated_responses() {
+    fn wire_cache_rejects_mismatched_and_truncated_responses() {
         let mut cache = crate::dns_cache::DnsCache::new(
             4,
             crate::dns_cache::DnsCachePolicy::default(),
         )
         .unwrap();
+        let query = example_query();
 
-        let query = {
-            let mut packet = example_message();
-            packet[2] = 0;
-            packet[3] = 0;
-            packet
-        };
+        let mut wrong_id = example_message();
+        wrong_id[0] ^= 0xff;
         assert_eq!(
-            cache.insert_dns_wire_response(query, false, true, false, 1),
-            Err(crate::dns_cache::DnsWireCacheError::NotAResponse)
+            cache.insert_dns_response_for_query(
+                &query,
+                wrong_id,
+                false,
+                true,
+                false,
+                1,
+            ),
+            Err(crate::dns_cache::DnsWireCacheError::Wire(
+                DnsWireError::TransactionIdMismatch
+            ))
         );
 
-        let truncated = {
-            let mut packet = example_message();
-            packet[2] |= 0x02;
-            packet
-        };
+        let mut truncated = example_message();
+        truncated[2] |= 0x02;
         assert_eq!(
-            cache.insert_dns_wire_response(truncated, false, true, false, 1),
+            cache.insert_dns_response_for_query(
+                &query,
+                truncated,
+                false,
+                true,
+                false,
+                1,
+            ),
             Err(crate::dns_cache::DnsWireCacheError::TruncatedResponse)
         );
         assert!(cache.is_empty());

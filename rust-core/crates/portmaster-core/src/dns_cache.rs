@@ -349,31 +349,6 @@ impl DnsCache {
         })
     }
 
-    /// Parses and inserts a raw DNS response using its question and RR TTLs.
-    ///
-    /// The response is accepted only when it is a complete response with one
-    /// question. Connectivity and online state are supplied by the caller
-    /// because they come from Portmaster's network environment, not the DNS
-    /// packet itself.
-    pub fn insert_dns_wire_response(
-        &mut self,
-        payload: Vec<u8>,
-        is_connectivity_domain: bool,
-        online: bool,
-        no_caching: bool,
-        now_unix: u64,
-    ) -> Result<bool, DnsWireCacheError> {
-        let metadata = parse_dns_message(&payload)?;
-        self.insert_parsed_dns_response(
-            payload,
-            metadata,
-            is_connectivity_domain,
-            online,
-            no_caching,
-            now_unix,
-        )
-    }
-
     /// Validates and caches a response in the context of its original query.
     ///
     /// The response cannot be cached under a different transaction ID,
@@ -435,7 +410,7 @@ impl DnsCache {
 
     /// Inserts a cacheable response. Returns false for no-cache requests,
     /// connectivity domains, and RCodes that Portmaster does not persist.
-    pub fn insert(
+    fn insert(
         &mut self,
         key: DnsQueryKey,
         payload: Vec<u8>,
