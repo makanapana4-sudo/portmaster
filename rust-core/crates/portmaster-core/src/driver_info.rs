@@ -1,4 +1,6 @@
-use crate::driver_protocol::{InfoFrame, InfoKind, ProtocolError};
+use crate::driver_protocol::{
+    parse_info_frame, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
+};
 
 const IPV4_BANDWIDTH_RECORD_SIZE: usize = 28;
 const IPV6_BANDWIDTH_RECORD_SIZE: usize = 52;
@@ -179,8 +181,17 @@ pub enum DriverInfo<'a> {
     BandwidthV6(BandwidthStatsV6<'a>),
 }
 
+/// Parses and decodes one complete frame using the default 16 MiB size limit.
+pub fn parse_driver_info_frame(
+    input: &[u8],
+) -> Result<(DriverInfo<'_>, usize), ProtocolError> {
+    let (frame, consumed) = parse_info_frame(input, DEFAULT_MAX_INFO_PAYLOAD)?;
+    let info = parse_driver_info(frame)?;
+    Ok((info, consumed))
+}
+
 /// Decodes a frame produced by the existing Windows driver protocol.
-///
+
 /// The function validates each fixed-size field and each advertised payload
 /// length. Variable-length packet bytes and bandwidth records are borrowed
 /// from the original frame rather than copied into new allocations.
