@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -306,5 +307,86 @@ func TestRecvInfoDecodesBandwidthAcrossBatchBoundary(t *testing.T) {
 		last.TransmittedBytes != uint64(recordCount+9) ||
 		last.ReceivedBytes != uint64(recordCount+19) {
 		t.Fatalf("last record decoded incorrectly: %+v", last)
+	}
+}
+
+var (
+	benchmarkInfoSink      *Info
+	benchmarkBandwidthSink []BandwidthValueV4
+)
+
+func BenchmarkRecvInfoConnectionV4BinaryReadBaseline(b *testing.B) {
+	payload := make([]byte, 31+4+4)
+	binary.LittleEndian.PutUint64(payload[0:8], 123)
+	binary.LittleEndian.PutUint64(payload[8:16], 456)
+	payload[17] = 6
+	binary.LittleEndian.PutUint16(payload[26:28], 1234)
+	binary.LittleEndian.PutUint16(payload[28:30], 443)
+	binary.LittleEndian.PutUint32(payload[31:35], 4)
+	copy(payload[35:], []byte{1, 2, 3, 4})
+
+	frame := makeInfoFrame(InfoConnectionIpv4, payload)
+	reader := bytes.NewReader(frame[5:])
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame[5:])
+		parsed := &ConnectionV4{}
+		if err := binary.Read(reader, binary.LittleEndian, &parsed.connectionV4Internal); err != nil {
+			b.Fatal(err)
+		}
+
+		var payloadSize uint32
+		if err := binary.Read(reader, binary.LittleEndian, &payloadSize); err != nil {
+			b.Fatal(err)
+		}
+		parsed.Payload = make([]byte, int(payloadSize))
+		if _, err := io.ReadFull(reader, parsed.Payload); err != nil {
+			b.Fatal(err)
+		}
+		benchmarkInfoSink = &Info{ConnectionV4: parsed}
+	}
+}
+
+func BenchmarkRecvInfoBandwidthV4BinaryReadBaseline(b *testing.B) {
+	const recordCount = 128
+	payload := make([]byte, 5+recordCount*bandwidthValueV4Size)
+	payload[0] = 6
+	binary.LittleEndian.PutUint32(payload[1:5], recordCount)
+	for i := 0; i < recordCount; i++ {
+		offset := 5 + i*bandwidthValueV4Size
+		binary.LittleEndian.PutUint16(payload[offset+4:offset+6], uint16(1000+i))
+		binary.LittleEndian.PutUint16(payload[offset+10:offset+12], 443)
+		binary.LittleEndian.PutUint64(payload[offset+12:offset+20], uint64(i))
+		binary.LittleEndian.PutUint64(payload[offset+20:offset+28], uint64(i*2))
+	}
+
+	frame := makeInfoFrame(InfoBandwidthStatsV4, payload)
+	reader := bytes.NewReader(frame[5:])
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame[5:])
+
+		var protocol uint8
+		if err := binary.Read(reader, binary.LittleEndian, &protocol); err != nil {
+			b.Fatal(err)
+		}
+		var count uint32
+		if err := binary.Read(reader, binary.LittleEndian, &count); err != nil {
+			b.Fatal(err)
+		}
+
+		values := make([]BandwidthValueV4, int(count))
+		for index := range values {
+			if err := binary.Read(reader, binary.LittleEndian, &values[index]); err != nil {
+				b.Fatal(err)
+			}
+		}
+		benchmarkBandwidthSink = values
 	}
 }
