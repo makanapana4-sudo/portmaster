@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - development
+    paths-ignore:
+      - 'rust-core/**'
+      - '.github/workflows/rust-core.yml'
+      - '.github/workflows/go.yml'
 
     tags:        
       - v*
