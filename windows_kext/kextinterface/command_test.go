@@ -2,6 +2,7 @@ package kextinterface
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"testing"
@@ -139,5 +140,75 @@ func TestSimpleCommandsUseSingleByteIDs(t *testing.T) {
 				t.Fatalf("got %v, want [%d]", output.Bytes(), test.want)
 			}
 		})
+	}
+}
+
+
+// Benchmarks compare the fixed-buffer writer with the previous binary.Write
+// serialization path. Run with: go test ./windows_kext/kextinterface -bench=Command -benchmem
+func BenchmarkSendVerdictCommandFixedBuffer(b *testing.B) {
+	writer := io.Discard
+	verdict := Verdict{ID: 123456789, Verdict: byte(VerdictAccept)}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := SendVerdictCommand(writer, verdict); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSendVerdictCommandBinaryWriteBaseline(b *testing.B) {
+	writer := io.Discard
+	verdict := Verdict{command: CommandVerdict, ID: 123456789, Verdict: byte(VerdictAccept)}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := binary.Write(writer, binary.LittleEndian, verdict); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSendUpdateV4CommandFixedBuffer(b *testing.B) {
+	writer := io.Discard
+	update := UpdateV4{
+		Protocol:      6,
+		LocalAddress:  [4]byte{10, 0, 0, 1},
+		LocalPort:     1234,
+		RemoteAddress: [4]byte{1, 1, 1, 1},
+		RemotePort:    443,
+		Verdict:       byte(VerdictAccept),
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := SendUpdateV4Command(writer, update); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSendUpdateV4CommandBinaryWriteBaseline(b *testing.B) {
+	writer := io.Discard
+	update := UpdateV4{
+		command:       CommandUpdateV4,
+		Protocol:      6,
+		LocalAddress:  [4]byte{10, 0, 0, 1},
+		LocalPort:     1234,
+		RemoteAddress: [4]byte{1, 1, 1, 1},
+		RemotePort:    443,
+		Verdict:       byte(VerdictAccept),
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := binary.Write(writer, binary.LittleEndian, update); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
