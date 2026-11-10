@@ -606,6 +606,150 @@ mod tests {
     }
 
     #[test]
+    fn decodes_checked_in_driver_event_fixture() {
+        let fixture = include_bytes!("../../../../windows_kext/kextinterface/testdata/rust_info_test.bin");
+        let (malformed, first_frame_len) =
+            parse_info_frame(fixture, DEFAULT_MAX_INFO_PAYLOAD).unwrap();
+        assert_eq!(malformed.kind, InfoKind::ConnectionIpv4);
+        assert!(matches!(
+            parse_driver_info(malformed),
+            Err(ProtocolError::TruncatedPayload { .. })
+        ));
+
+        let mut counts = [0usize; 7];
+        let mut offset = first_frame_len;
+
+        while offset < fixture.len() {
+            let (frame, frame_len) =
+                parse_info_frame(&fixture[offset..], DEFAULT_MAX_INFO_PAYLOAD).unwrap();
+            counts[frame.kind as usize] += 1;
+
+            match parse_driver_info(frame).unwrap() {
+                DriverInfo::LogLine { severity, message } => {
+                    assert_eq!(severity, 1);
+                    assert_eq!(message, b"prefix: test log");
+                }
+                DriverInfo::ConnectionV4(connection) => {
+                    assert_eq!(connection.id, 1);
+                    assert_eq!(connection.process_id, 2);
+                    assert_eq!(connection.direction, 3);
+                    assert_eq!(connection.protocol, 4);
+                    assert_eq!(connection.local_address, [1, 2, 3, 4]);
+                    assert_eq!(connection.remote_address, [2, 3, 4, 5]);
+                    assert_eq!(connection.local_port, 5);
+                    assert_eq!(connection.remote_port, 6);
+                    assert_eq!(connection.payload_layer, 7);
+                    assert_eq!(
+                        connection.packet_payload,
+                        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+                    );
+                }
+                DriverInfo::ConnectionV6(connection) => {
+                    assert_eq!(connection.id, 1);
+                    assert_eq!(connection.process_id, 2);
+                    assert_eq!(connection.direction, 3);
+                    assert_eq!(connection.protocol, 4);
+                    assert_eq!(
+                        connection.local_address,
+                        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+                    );
+                    assert_eq!(
+                        connection.remote_address,
+                        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+                    );
+                    assert_eq!(connection.local_port, 5);
+                    assert_eq!(connection.remote_port, 6);
+                    assert_eq!(connection.payload_layer, 7);
+                    assert_eq!(
+                        connection.packet_payload,
+                        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+                    );
+                }
+                DriverInfo::ConnectionEndV4(end) => {
+                    assert_eq!(end.process_id, 1);
+                    assert_eq!(end.direction, 2);
+                    assert_eq!(end.protocol, 3);
+                    assert_eq!(end.local_address, [1, 2, 3, 4]);
+                    assert_eq!(end.remote_address, [2, 3, 4, 5]);
+                    assert_eq!(end.local_port, 4);
+                    assert_eq!(end.remote_port, 5);
+                }
+                DriverInfo::ConnectionEndV6(end) => {
+                    assert_eq!(end.process_id, 1);
+                    assert_eq!(end.direction, 2);
+                    assert_eq!(end.protocol, 3);
+                    assert_eq!(
+                        end.local_address,
+                        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+                    );
+                    assert_eq!(
+                        end.remote_address,
+                        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+                    );
+                    assert_eq!(end.local_port, 4);
+                    assert_eq!(end.remote_port, 5);
+                }
+                DriverInfo::BandwidthV4(stats) => {
+                    assert_eq!(stats.protocol, 1);
+                    assert_eq!(stats.len(), 2);
+                    assert_eq!(
+                        stats.get(0),
+                        Some(BandwidthValueV4 {
+                            local_address: [1, 2, 3, 4],
+                            local_port: 1,
+                            remote_address: [2, 3, 4, 5],
+                            remote_port: 2,
+                            transmitted_bytes: 3,
+                            received_bytes: 4,
+                        })
+                    );
+                    assert_eq!(
+                        stats.get(1),
+                        Some(BandwidthValueV4 {
+                            local_address: [1, 2, 3, 4],
+                            local_port: 5,
+                            remote_address: [2, 3, 4, 5],
+                            remote_port: 6,
+                            transmitted_bytes: 7,
+                            received_bytes: 8,
+                        })
+                    );
+                }
+                DriverInfo::BandwidthV6(stats) => {
+                    assert_eq!(stats.protocol, 1);
+                    assert_eq!(stats.len(), 2);
+                    assert_eq!(
+                        stats.get(0),
+                        Some(BandwidthValueV6 {
+                            local_address: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+                            local_port: 1,
+                            remote_address: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+                            remote_port: 2,
+                            transmitted_bytes: 3,
+                            received_bytes: 4,
+                        })
+                    );
+                    assert_eq!(
+                        stats.get(1),
+                        Some(BandwidthValueV6 {
+                            local_address: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+                            local_port: 5,
+                            remote_address: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+                            remote_port: 6,
+                            transmitted_bytes: 7,
+                            received_bytes: 8,
+                        })
+                    );
+                }
+            }
+
+            offset += frame_len;
+        }
+
+        assert!(counts.iter().all(|count| *count > 0));
+    }
+
+    #[test]
     fn rejects_truncated_fixed_fields_and_payload_lengths() {
         assert!(matches!(
             parse_driver_info(frame(InfoKind::ConnectionEndV4, &[0; 4])),

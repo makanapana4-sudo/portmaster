@@ -369,6 +369,77 @@ mod tests {
     }
 
     #[test]
+    fn matches_checked_in_go_command_fixture() {
+        let fixture = include_bytes!("../../../../windows_kext/protocol/testdata/go_command_test.bin");
+        let mut offset = 0;
+        let mut counts = [0usize; 9];
+
+        while offset < fixture.len() {
+            let command_type = fixture[offset];
+            let command = match command_type {
+                value if value == CommandType::Shutdown as u8 => DriverCommand::Shutdown,
+                value if value == CommandType::Verdict as u8 => {
+                    let id = u64::from_le_bytes(fixture[offset + 1..offset + 9].try_into().unwrap());
+                    DriverCommand::Verdict {
+                        id,
+                        verdict: fixture[offset + 9],
+                    }
+                }
+                value if value == CommandType::UpdateV4 as u8 => {
+                    let mut local_address = [0; 4];
+                    let mut remote_address = [0; 4];
+                    local_address.copy_from_slice(&fixture[offset + 2..offset + 6]);
+                    remote_address.copy_from_slice(&fixture[offset + 8..offset + 12]);
+                    DriverCommand::UpdateV4 {
+                        protocol: fixture[offset + 1],
+                        local_address,
+                        local_port: u16::from_le_bytes([fixture[offset + 6], fixture[offset + 7]]),
+                        remote_address,
+                        remote_port: u16::from_le_bytes([fixture[offset + 12], fixture[offset + 13]]),
+                        verdict: fixture[offset + 14],
+                    }
+                }
+                value if value == CommandType::UpdateV6 as u8 => {
+                    let mut local_address = [0; 16];
+                    let mut remote_address = [0; 16];
+                    local_address.copy_from_slice(&fixture[offset + 2..offset + 18]);
+                    remote_address.copy_from_slice(&fixture[offset + 20..offset + 36]);
+                    DriverCommand::UpdateV6 {
+                        protocol: fixture[offset + 1],
+                        local_address,
+                        local_port: u16::from_le_bytes([fixture[offset + 18], fixture[offset + 19]]),
+                        remote_address,
+                        remote_port: u16::from_le_bytes([fixture[offset + 36], fixture[offset + 37]]),
+                        verdict: fixture[offset + 38],
+                    }
+                }
+                value if value == CommandType::ClearCache as u8 => DriverCommand::ClearCache,
+                value if value == CommandType::GetLogs as u8 => DriverCommand::GetLogs,
+                value if value == CommandType::GetBandwidthStats as u8 => {
+                    DriverCommand::GetBandwidthStats
+                }
+                value if value == CommandType::PrintMemoryStats as u8 => {
+                    DriverCommand::PrintMemoryStats
+                }
+                value if value == CommandType::CleanEndedConnections as u8 => {
+                    DriverCommand::CleanEndedConnections
+                }
+                value => panic!("unknown command id in Go fixture: {value}"),
+            };
+
+            let encoded = command.encode();
+            let end = offset + encoded.len();
+            assert!(end <= fixture.len(), "command overruns the fixture");
+            assert_eq!(encoded.as_slice(), &fixture[offset..end]);
+            counts[command_type as usize] += 1;
+            offset = end;
+        }
+
+        assert!(counts[0..7].iter().all(|count| *count > 0));
+        assert!(counts[8] > 0);
+    }
+
+    #[test]
     fn reuses_preallocated_command_buffer() {
         let command = DriverCommand::UpdateV6 {
             protocol: 17,
