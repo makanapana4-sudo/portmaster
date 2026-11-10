@@ -36,7 +36,7 @@ impl ConnectionKey {
     }
 
     #[must_use]
-    pub const fn is_loopback(&self) -> bool {
+    pub fn is_loopback(&self) -> bool {
         self.local_address.is_loopback() && self.remote_address.is_loopback()
     }
 }
