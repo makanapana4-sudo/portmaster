@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod config;
 pub mod connection;
+pub mod driver_info;
 pub mod driver_protocol;
 pub mod error;
 pub mod event_queue;
@@ -14,6 +15,11 @@ pub mod event_queue;
 pub use cache::{BoundedTtlCache, CacheConfigError};
 pub use config::{ConfigError, CoreConfig, ResourceLimits};
 pub use connection::{ConnectionKey, NetworkProtocol};
+pub use driver_info::{
+    parse_driver_info, BandwidthStatsV4, BandwidthStatsV6, BandwidthValueV4,
+    BandwidthValueV6, ConnectionEndV4, ConnectionEndV6, ConnectionInfoV4,
+    ConnectionInfoV6, DriverInfo,
+};
 pub use driver_protocol::{
     parse_info_frame, DriverCommand, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
 };
