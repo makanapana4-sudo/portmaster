@@ -48,7 +48,7 @@ The change is protocol-preserving and has byte-layout and short-write tests. It 
 
 ## Protocol parsing safeguards and microbenchmarks
 
-The Go driver-info parser now rejects frames larger than 16 MiB before attempting to read their body. It validates bandwidth-record counts against the remaining bytes in the declared frame before allocating a slice, checks every fixed-size read against the current frame boundary, and drains unread frame bytes in chunks rather than allocating a buffer equal to the remaining frame length.
+The Go driver-info parser now rejects frames larger than 16 MiB before attempting to read their body. It validates bandwidth-record counts against the remaining bytes in the declared frame before allocating a slice, checks every fixed-size read against the current frame boundary, and drains unread frame bytes in chunks rather than allocating a buffer equal to the remaining frame length. Fixed connection, end-event, and bandwidth records are decoded from fixed-size stack buffers with direct little-endian field reads instead of reflection-based struct decoding. Successful frames no longer build formatted error values on the hot path.
 
 The Rust core now decodes all seven driver info message types. Connection packet payloads, log messages, and bandwidth record storage are borrowed from the original frame. Bandwidth records are decoded on demand by index or iterator, avoiding a second allocation for a slice of decoded records.
 
@@ -59,3 +59,12 @@ go test ./windows_kext/kextinterface -run '^$' -bench=Command -benchmem
 ```
 
 Run the benchmarks on the same machine and Go version, and compare repeated runs. These microbenchmarks isolate the serialization function; they do not measure full Portmaster CPU usage or startup time.
+
+
+The parser benchmarks can be run together with the command benchmarks:
+
+```sh
+go test ./windows_kext/kextinterface -run '^$' -bench='(Command|RecvInfo)' -benchmem
+```
+
+The new fixed-offset decoder is intentionally benchmarked separately for a small IPv4 connection event and a 128-record bandwidth event. Compare against the pre-change build on the same Go version; do not infer whole-service savings from these isolated benchmarks.
