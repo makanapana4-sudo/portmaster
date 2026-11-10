@@ -51,7 +51,11 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ZeroLimit(name) => write!(formatter, "{name} must be greater than zero"),
-            Self::LimitTooLarge { name, value, maximum } => {
+            Self::LimitTooLarge {
+                name,
+                value,
+                maximum,
+            } => {
                 write!(formatter, "{name} ({value}) exceeds maximum ({maximum})")
             }
         }
@@ -102,5 +106,47 @@ impl CoreConfig {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_configuration_is_valid() {
+        assert!(CoreConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn zero_capacity_is_rejected() {
+        let config = CoreConfig {
+            limits: ResourceLimits {
+                event_queue_capacity: 0,
+                ..ResourceLimits::default()
+            },
+            ..CoreConfig::default()
+        };
+
+        assert!(matches!(
+            config.validate(),
+            Err(CoreError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn excessive_capacity_is_rejected() {
+        let config = CoreConfig {
+            limits: ResourceLimits {
+                dns_cache_capacity: 1_000_001,
+                ..ResourceLimits::default()
+            },
+            ..CoreConfig::default()
+        };
+
+        assert!(matches!(
+            config.validate(),
+            Err(CoreError::InvalidConfiguration(_))
+        ));
     }
 }
