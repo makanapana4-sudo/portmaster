@@ -16,7 +16,9 @@ func makeInfoFrame(infoType byte, payload []byte) []byte {
 }
 
 func TestRecvInfoRejectsOversizedFrameBeforeReadingPayload(t *testing.T) {
-	header := makeInfoFrame(InfoLogLine, make([]byte, maxInfoPayloadSize+1))[:5]
+	header := make([]byte, 5)
+	header[0] = InfoLogLine
+	binary.LittleEndian.PutUint32(header[1:], maxInfoPayloadSize+1)
 
 	_, err := RecvInfo(bytes.NewReader(header))
 	if !errors.Is(err, ErrInfoPayloadTooLarge) {
