@@ -65,56 +65,85 @@ type UpdateV6 struct {
 	Verdict       uint8
 }
 
+// writeCommand handles short writes so a partial driver command is never
+// treated as successfully delivered.
+func writeCommand(writer io.Writer, command []byte) error {
+	for len(command) > 0 {
+		written, err := writer.Write(command)
+		if written > 0 {
+			command = command[written:]
+		}
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
 // SendShutdownCommand sends a Shutdown command to the kext.
 func SendShutdownCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandShutdown})
-	return err
+	return writeCommand(writer, []byte{CommandShutdown})
 }
 
 // SendVerdictCommand sends a Verdict command to the kext.
 func SendVerdictCommand(writer io.Writer, verdict Verdict) error {
-	verdict.command = CommandVerdict
-	return binary.Write(writer, binary.LittleEndian, verdict)
+	var command [10]byte
+	command[0] = CommandVerdict
+	binary.LittleEndian.PutUint64(command[1:9], verdict.ID)
+	command[9] = verdict.Verdict
+	return writeCommand(writer, command[:])
 }
 
 // SendUpdateV4Command sends a UpdateV4 command to the kext.
 func SendUpdateV4Command(writer io.Writer, update UpdateV4) error {
-	update.command = CommandUpdateV4
-	return binary.Write(writer, binary.LittleEndian, update)
+	var command [15]byte
+	command[0] = CommandUpdateV4
+	command[1] = update.Protocol
+	copy(command[2:6], update.LocalAddress[:])
+	binary.LittleEndian.PutUint16(command[6:8], update.LocalPort)
+	copy(command[8:12], update.RemoteAddress[:])
+	binary.LittleEndian.PutUint16(command[12:14], update.RemotePort)
+	command[14] = update.Verdict
+	return writeCommand(writer, command[:])
 }
 
 // SendUpdateV6Command sends a UpdateV6 command to the kext.
 func SendUpdateV6Command(writer io.Writer, update UpdateV6) error {
-	update.command = CommandUpdateV6
-	return binary.Write(writer, binary.LittleEndian, update)
+	var command [39]byte
+	command[0] = CommandUpdateV6
+	command[1] = update.Protocol
+	copy(command[2:18], update.LocalAddress[:])
+	binary.LittleEndian.PutUint16(command[18:20], update.LocalPort)
+	copy(command[20:36], update.RemoteAddress[:])
+	binary.LittleEndian.PutUint16(command[36:38], update.RemotePort)
+	command[38] = update.Verdict
+	return writeCommand(writer, command[:])
 }
 
 // SendClearCacheCommand sends a ClearCache command to the kext.
 func SendClearCacheCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandClearCache})
-	return err
+	return writeCommand(writer, []byte{CommandClearCache})
 }
 
 // SendGetLogsCommand sends a GetLogs command to the kext.
 func SendGetLogsCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandGetLogs})
-	return err
+	return writeCommand(writer, []byte{CommandGetLogs})
 }
 
 // SendGetBandwidthStatsCommand sends a GetBandwidthStats command to the kext.
 func SendGetBandwidthStatsCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandBandwidthStats})
-	return err
+	return writeCommand(writer, []byte{CommandBandwidthStats})
 }
 
 // SendPrintMemoryStatsCommand sends a PrintMemoryStats command to the kext.
 func SendPrintMemoryStatsCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandPrintMemoryStats})
-	return err
+	return writeCommand(writer, []byte{CommandPrintMemoryStats})
 }
 
 // SendCleanEndedConnectionsCommand sends a CleanEndedConnections command to the kext.
 func SendCleanEndedConnectionsCommand(writer io.Writer) error {
-	_, err := writer.Write([]byte{CommandCleanEndedConnections})
-	return err
+	return writeCommand(writer, []byte{CommandCleanEndedConnections})
 }
