@@ -1,250 +1,365 @@
-use protocol::{command::CommandType, info::InfoType as DriverInfoType};
-use std::convert::TryFrom;
+use crate::driver_protocol::{
+    parse_info_frame, InfoFrame, InfoKind, ProtocolError, DEFAULT_MAX_INFO_PAYLOAD,
+};
 
-/// Maximum payload accepted by the default driver-info parser.
-pub const DEFAULT_MAX_INFO_PAYLOAD: usize = 16 * 1024 * 1024;
+const IPV4_BANDWIDTH_RECORD_SIZE: usize = 28;
+const IPV6_BANDWIDTH_RECORD_SIZE: usize = 52;
 
-/// Message kinds emitted by the existing Windows kernel driver.
+/// A decoded IPv4 connection event. Packet bytes remain borrowed from the frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum InfoKind {
-    LogLine = 0,
-    ConnectionIpv4 = 1,
-    ConnectionIpv6 = 2,
-    ConnectionEndV4 = 3,
-    ConnectionEndV6 = 4,
-    BandwidthStatsV4 = 5,
-    BandwidthStatsV6 = 6,
+pub struct ConnectionInfoV4<'a> {
+    pub id: u64,
+    pub process_id: u64,
+    pub direction: u8,
+    pub protocol: u8,
+    pub local_address: [u8; 4],
+    pub remote_address: [u8; 4],
+    pub local_port: u16,
+    pub remote_port: u16,
+    pub payload_layer: u8,
+    pub packet_payload: &'a [u8],
 }
 
-const INFO_LOG_LINE: u8 = DriverInfoType::LogLine as u8;
-const INFO_CONNECTION_IPV4: u8 = DriverInfoType::ConnectionIpv4 as u8;
-const INFO_CONNECTION_IPV6: u8 = DriverInfoType::ConnectionIpv6 as u8;
-const INFO_CONNECTION_END_V4: u8 = DriverInfoType::ConnectionEndEventV4 as u8;
-const INFO_CONNECTION_END_V6: u8 = DriverInfoType::ConnectionEndEventV6 as u8;
-const INFO_BANDWIDTH_STATS_V4: u8 = DriverInfoType::BandwidthStatsV4 as u8;
-const INFO_BANDWIDTH_STATS_V6: u8 = DriverInfoType::BandwidthStatsV6 as u8;
+/// A decoded IPv6 connection event. Packet bytes remain borrowed from the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectionInfoV6<'a> {
+    pub id: u64,
+    pub process_id: u64,
+    pub direction: u8,
+    pub protocol: u8,
+    pub local_address: [u8; 16],
+    pub remote_address: [u8; 16],
+    pub local_port: u16,
+    pub remote_port: u16,
+    pub payload_layer: u8,
+    pub packet_payload: &'a [u8],
+}
 
-impl TryFrom<u8> for InfoKind {
-    type Error = ProtocolError;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectionEndV4 {
+    pub process_id: u64,
+    pub direction: u8,
+    pub protocol: u8,
+    pub local_address: [u8; 4],
+    pub remote_address: [u8; 4],
+    pub local_port: u16,
+    pub remote_port: u16,
+}
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            INFO_LOG_LINE => Ok(Self::LogLine),
-            INFO_CONNECTION_IPV4 => Ok(Self::ConnectionIpv4),
-            INFO_CONNECTION_IPV6 => Ok(Self::ConnectionIpv6),
-            INFO_CONNECTION_END_V4 => Ok(Self::ConnectionEndV4),
-            INFO_CONNECTION_END_V6 => Ok(Self::ConnectionEndV6),
-            INFO_BANDWIDTH_STATS_V4 => Ok(Self::BandwidthStatsV4),
-            INFO_BANDWIDTH_STATS_V6 => Ok(Self::BandwidthStatsV6),
-            other => Err(ProtocolError::UnknownInfoType(other)),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectionEndV6 {
+    pub process_id: u64,
+    pub direction: u8,
+    pub protocol: u8,
+    pub local_address: [u8; 16],
+    pub remote_address: [u8; 16],
+    pub local_port: u16,
+    pub remote_port: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandwidthValueV4 {
+    pub local_address: [u8; 4],
+    pub local_port: u16,
+    pub remote_address: [u8; 4],
+    pub remote_port: u16,
+    pub transmitted_bytes: u64,
+    pub received_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandwidthValueV6 {
+    pub local_address: [u8; 16],
+    pub local_port: u16,
+    pub remote_address: [u8; 16],
+    pub remote_port: u16,
+    pub transmitted_bytes: u64,
+    pub received_bytes: u64,
+}
+
+/// A borrowed view over the fixed-size IPv4 bandwidth records in a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandwidthStatsV4<'a> {
+    pub protocol: u8,
+    records: &'a [u8],
+    count: usize,
+}
+
+impl BandwidthStatsV4<'_> {
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<BandwidthValueV4> {
+        if index >= self.count {
+            return None;
         }
+
+        let start = index.checked_mul(IPV4_BANDWIDTH_RECORD_SIZE)?;
+        let end = start.checked_add(IPV4_BANDWIDTH_RECORD_SIZE)?;
+        let mut reader = SliceReader::new(self.records.get(start..end)?);
+
+        Some(BandwidthValueV4 {
+            local_address: reader.array().ok()?,
+            local_port: reader.u16().ok()?,
+            remote_address: reader.array().ok()?,
+            remote_port: reader.u16().ok()?,
+            transmitted_bytes: reader.u64().ok()?,
+            received_bytes: reader.u64().ok()?,
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = BandwidthValueV4> + '_ {
+        (0..self.count).filter_map(|index| self.get(index))
     }
 }
 
-/// Errors raised while validating a driver protocol frame.
+/// A borrowed view over the fixed-size IPv6 bandwidth records in a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProtocolError {
-    TruncatedHeader,
-    TruncatedPayload { expected: usize, available: usize },
-    PayloadTooLarge { length: usize, maximum: usize },
-    LengthOverflow,
-    UnknownInfoType(u8),
+pub struct BandwidthStatsV6<'a> {
+    pub protocol: u8,
+    records: &'a [u8],
+    count: usize,
 }
 
-impl std::fmt::Display for ProtocolError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TruncatedHeader => formatter.write_str("driver info header is incomplete"),
-            Self::TruncatedPayload {
-                expected,
-                available,
-            } => write!(
-                formatter,
-                "driver info payload is truncated: expected {expected} bytes, got {available}"
-            ),
-            Self::PayloadTooLarge { length, maximum } => write!(
-                formatter,
-                "driver info payload is too large: {length} bytes exceeds {maximum}"
-            ),
-            Self::LengthOverflow => formatter.write_str("driver info frame length overflowed"),
-            Self::UnknownInfoType(value) => write!(formatter, "unknown driver info type: {value}"),
+impl BandwidthStatsV6<'_> {
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<BandwidthValueV6> {
+        if index >= self.count {
+            return None;
         }
+
+        let start = index.checked_mul(IPV6_BANDWIDTH_RECORD_SIZE)?;
+        let end = start.checked_add(IPV6_BANDWIDTH_RECORD_SIZE)?;
+        let mut reader = SliceReader::new(self.records.get(start..end)?);
+
+        Some(BandwidthValueV6 {
+            local_address: reader.array().ok()?,
+            local_port: reader.u16().ok()?,
+            remote_address: reader.array().ok()?,
+            remote_port: reader.u16().ok()?,
+            transmitted_bytes: reader.u64().ok()?,
+            received_bytes: reader.u64().ok()?,
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = BandwidthValueV6> + '_ {
+        (0..self.count).filter_map(|index| self.get(index))
     }
 }
 
-impl std::error::Error for ProtocolError {}
-
-/// A borrowed view of one driver info frame.
-///
-/// The wire header is one info-type byte followed by a little-endian 32-bit
-/// payload length. The payload is borrowed from the input buffer; parsing
-/// does not allocate or copy it.
+/// Fully decoded driver message. Packet data and record arrays borrow the
+/// original input frame, so parsing does not copy large payloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InfoFrame<'a> {
-    pub kind: InfoKind,
-    pub payload: &'a [u8],
+pub enum DriverInfo<'a> {
+    LogLine {
+        severity: u8,
+        message: &'a [u8],
+    },
+    ConnectionV4(ConnectionInfoV4<'a>),
+    ConnectionV6(ConnectionInfoV6<'a>),
+    ConnectionEndV4(ConnectionEndV4),
+    ConnectionEndV6(ConnectionEndV6),
+    BandwidthV4(BandwidthStatsV4<'a>),
+    BandwidthV6(BandwidthStatsV6<'a>),
 }
 
-/// Validates and reads the first frame in a stream buffer.
-///
-/// Returns the borrowed frame and the number of input bytes it consumes.
-/// Bytes after that frame are left untouched for the next parser call.
-pub fn parse_info_frame(
+/// Parses and decodes one complete frame using the default 16 MiB size limit.
+pub fn parse_driver_info_frame(
     input: &[u8],
-    maximum_payload_len: usize,
-) -> Result<(InfoFrame<'_>, usize), ProtocolError> {
-    const HEADER_SIZE: usize = 5;
-
-    if input.len() < HEADER_SIZE {
-        return Err(ProtocolError::TruncatedHeader);
-    }
-
-    let kind = InfoKind::try_from(input[0])?;
-    let payload_len = u32::from_le_bytes([input[1], input[2], input[3], input[4]]) as usize;
-
-    if payload_len > maximum_payload_len {
-        return Err(ProtocolError::PayloadTooLarge {
-            length: payload_len,
-            maximum: maximum_payload_len,
-        });
-    }
-
-    let frame_len = HEADER_SIZE
-        .checked_add(payload_len)
-        .ok_or(ProtocolError::LengthOverflow)?;
-
-    if input.len() < frame_len {
-        return Err(ProtocolError::TruncatedPayload {
-            expected: payload_len,
-            available: input.len() - HEADER_SIZE,
-        });
-    }
-
-    Ok((
-        InfoFrame {
-            kind,
-            payload: &input[HEADER_SIZE..frame_len],
-        },
-        frame_len,
-    ))
+) -> Result<(DriverInfo<'_>, usize), ProtocolError> {
+    let (frame, consumed) = parse_info_frame(input, DEFAULT_MAX_INFO_PAYLOAD)?;
+    let info = parse_driver_info(frame)?;
+    Ok((info, consumed))
 }
 
-/// Commands supported by the current Windows kernel-driver interface.
-///
-/// This encoder uses the command discriminants from the existing
-/// windows_kext/protocol crate and preserves the Go-compatible packed
-/// little-endian wire layout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DriverCommand {
-    Shutdown,
-    Verdict {
-        id: u64,
-        verdict: u8,
-    },
-    UpdateV4 {
-        protocol: u8,
-        local_address: [u8; 4],
-        local_port: u16,
-        remote_address: [u8; 4],
-        remote_port: u16,
-        verdict: u8,
-    },
-    UpdateV6 {
-        protocol: u8,
-        local_address: [u8; 16],
-        local_port: u16,
-        remote_address: [u8; 16],
-        remote_port: u16,
-        verdict: u8,
-    },
-    ClearCache,
-    GetLogs,
-    GetBandwidthStats,
-    PrintMemoryStats,
-    CleanEndedConnections,
+/// Decodes a frame produced by the existing Windows driver protocol.
+
+/// The function validates each fixed-size field and each advertised payload
+/// length. Variable-length packet bytes and bandwidth records are borrowed
+/// from the original frame rather than copied into new allocations.
+pub fn parse_driver_info<'a>(
+    frame: InfoFrame<'a>,
+) -> Result<DriverInfo<'a>, ProtocolError> {
+    let mut reader = SliceReader::new(frame.payload);
+
+    match frame.kind {
+        InfoKind::LogLine => {
+            let severity = reader.u8()?;
+            let message = reader.remaining();
+            Ok(DriverInfo::LogLine { severity, message })
+        }
+        InfoKind::ConnectionIpv4 => {
+            let id = reader.u64()?;
+            let process_id = reader.u64()?;
+            let direction = reader.u8()?;
+            let protocol = reader.u8()?;
+            let local_address = reader.array()?;
+            let remote_address = reader.array()?;
+            let local_port = reader.u16()?;
+            let remote_port = reader.u16()?;
+            let payload_layer = reader.u8()?;
+            let payload_len = reader.u32()? as usize;
+            let packet_payload = reader.take(payload_len)?;
+
+            Ok(DriverInfo::ConnectionV4(ConnectionInfoV4 {
+                id,
+                process_id,
+                direction,
+                protocol,
+                local_address,
+                remote_address,
+                local_port,
+                remote_port,
+                payload_layer,
+                packet_payload,
+            }))
+        }
+        InfoKind::ConnectionIpv6 => {
+            let id = reader.u64()?;
+            let process_id = reader.u64()?;
+            let direction = reader.u8()?;
+            let protocol = reader.u8()?;
+            let local_address = reader.array()?;
+            let remote_address = reader.array()?;
+            let local_port = reader.u16()?;
+            let remote_port = reader.u16()?;
+            let payload_layer = reader.u8()?;
+            let payload_len = reader.u32()? as usize;
+            let packet_payload = reader.take(payload_len)?;
+
+            Ok(DriverInfo::ConnectionV6(ConnectionInfoV6 {
+                id,
+                process_id,
+                direction,
+                protocol,
+                local_address,
+                remote_address,
+                local_port,
+                remote_port,
+                payload_layer,
+                packet_payload,
+            }))
+        }
+        InfoKind::ConnectionEndV4 => Ok(DriverInfo::ConnectionEndV4(ConnectionEndV4 {
+            process_id: reader.u64()?,
+            direction: reader.u8()?,
+            protocol: reader.u8()?,
+            local_address: reader.array()?,
+            remote_address: reader.array()?,
+            local_port: reader.u16()?,
+            remote_port: reader.u16()?,
+        })),
+        InfoKind::ConnectionEndV6 => Ok(DriverInfo::ConnectionEndV6(ConnectionEndV6 {
+            process_id: reader.u64()?,
+            direction: reader.u8()?,
+            protocol: reader.u8()?,
+            local_address: reader.array()?,
+            remote_address: reader.array()?,
+            local_port: reader.u16()?,
+            remote_port: reader.u16()?,
+        })),
+        InfoKind::BandwidthStatsV4 => {
+            let protocol = reader.u8()?;
+            let count = reader.u32()? as usize;
+            let byte_count = count
+                .checked_mul(IPV4_BANDWIDTH_RECORD_SIZE)
+                .ok_or(ProtocolError::LengthOverflow)?;
+            let records = reader.take(byte_count)?;
+
+            Ok(DriverInfo::BandwidthV4(BandwidthStatsV4 {
+                protocol,
+                records,
+                count,
+            }))
+        }
+        InfoKind::BandwidthStatsV6 => {
+            let protocol = reader.u8()?;
+            let count = reader.u32()? as usize;
+            let byte_count = count
+                .checked_mul(IPV6_BANDWIDTH_RECORD_SIZE)
+                .ok_or(ProtocolError::LengthOverflow)?;
+            let records = reader.take(byte_count)?;
+
+            Ok(DriverInfo::BandwidthV6(BandwidthStatsV6 {
+                protocol,
+                records,
+                count,
+            }))
+        }
+    }
 }
 
-impl DriverCommand {
-    /// Returns the exact number of bytes required by this command.
-    #[must_use]
-    pub const fn encoded_len(&self) -> usize {
-        match self {
-            Self::Shutdown
-            | Self::ClearCache
-            | Self::GetLogs
-            | Self::GetBandwidthStats
-            | Self::PrintMemoryStats
-            | Self::CleanEndedConnections => 1,
-            Self::Verdict { .. } => 10,
-            Self::UpdateV4 { .. } => 15,
-            Self::UpdateV6 { .. } => 39,
-        }
+struct SliceReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> SliceReader<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
     }
 
-    /// Encodes the command into a reusable buffer.
-    ///
-    /// The buffer is cleared first. Reserving the exact encoded size allows
-    /// callers to reuse one allocation for repeated driver commands.
-    pub fn encode_into(&self, output: &mut Vec<u8>) {
-        output.clear();
-        output.reserve(self.encoded_len());
+    fn take(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or(ProtocolError::LengthOverflow)?;
 
-        match self {
-            Self::Shutdown => output.push(CommandType::Shutdown as u8),
-            Self::Verdict { id, verdict } => {
-                output.push(CommandType::Verdict as u8);
-                output.extend_from_slice(&id.to_le_bytes());
-                output.push(*verdict);
-            }
-            Self::UpdateV4 {
-                protocol,
-                local_address,
-                local_port,
-                remote_address,
-                remote_port,
-                verdict,
-            } => {
-                output.push(CommandType::UpdateV4 as u8);
-                output.push(*protocol);
-                output.extend_from_slice(local_address);
-                output.extend_from_slice(&local_port.to_le_bytes());
-                output.extend_from_slice(remote_address);
-                output.extend_from_slice(&remote_port.to_le_bytes());
-                output.push(*verdict);
-            }
-            Self::UpdateV6 {
-                protocol,
-                local_address,
-                local_port,
-                remote_address,
-                remote_port,
-                verdict,
-            } => {
-                output.push(CommandType::UpdateV6 as u8);
-                output.push(*protocol);
-                output.extend_from_slice(local_address);
-                output.extend_from_slice(&local_port.to_le_bytes());
-                output.extend_from_slice(remote_address);
-                output.extend_from_slice(&remote_port.to_le_bytes());
-                output.push(*verdict);
-            }
-            Self::ClearCache => output.push(CommandType::ClearCache as u8),
-            Self::GetLogs => output.push(CommandType::GetLogs as u8),
-            Self::GetBandwidthStats => output.push(CommandType::GetBandwidthStats as u8),
-            Self::PrintMemoryStats => output.push(CommandType::PrintMemoryStats as u8),
-            Self::CleanEndedConnections => {
-                output.push(CommandType::CleanEndedConnections as u8);
-            }
+        if end > self.bytes.len() {
+            return Err(ProtocolError::TruncatedPayload {
+                expected: length,
+                available: self.bytes.len().saturating_sub(self.offset),
+            });
         }
+
+        let output = &self.bytes[self.offset..end];
+        self.offset = end;
+        Ok(output)
     }
 
-    /// Encodes the command into a newly allocated byte vector.
-    #[must_use]
-    pub fn encode(&self) -> Vec<u8> {
-        let mut output = Vec::with_capacity(self.encoded_len());
-        self.encode_into(&mut output);
-        output
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], ProtocolError> {
+        let bytes = self.take(N)?;
+        let mut output = [0; N];
+        output.copy_from_slice(bytes);
+        Ok(output)
+    }
+
+    fn u8(&mut self) -> Result<u8, ProtocolError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, ProtocolError> {
+        Ok(u16::from_le_bytes(self.array()?))
+    }
+
+    fn u32(&mut self) -> Result<u32, ProtocolError> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    fn u64(&mut self) -> Result<u64, ProtocolError> {
+        Ok(u64::from_le_bytes(self.array()?))
+    }
+
+    fn remaining(&self) -> &'a [u8] {
+        &self.bytes[self.offset..]
     }
 }
 
@@ -252,135 +367,248 @@ impl DriverCommand {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_frame_without_copying_or_consuming_following_frame() {
-        let bytes = [1, 2, 0, 0, 0, 10, 11, 0, 0, 0, 0];
-        let (frame, consumed) = parse_info_frame(&bytes, 64).unwrap();
+    fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
 
-        assert_eq!(frame.kind, InfoKind::ConnectionIpv4);
-        assert_eq!(frame.payload, &[10, 11]);
-        assert_eq!(consumed, 7);
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u64(bytes: &mut Vec<u8>, value: u64) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn frame(kind: InfoKind, payload: &[u8]) -> InfoFrame<'_> {
+        InfoFrame { kind, payload }
     }
 
     #[test]
-    fn rejects_truncated_and_oversized_frames() {
-        assert_eq!(
-            parse_info_frame(&[1, 0, 0], 64).err(),
-            Some(ProtocolError::TruncatedHeader)
-        );
+    fn decodes_ipv4_connection_and_borrows_packet_payload() {
+        let mut bytes = Vec::new();
+        push_u64(&mut bytes, 7);
+        push_u64(&mut bytes, 42);
+        bytes.extend_from_slice(&[1, 6]);
+        bytes.extend_from_slice(&[10, 0, 0, 1]);
+        bytes.extend_from_slice(&[1, 1, 1, 1]);
+        push_u16(&mut bytes, 1234);
+        push_u16(&mut bytes, 443);
+        bytes.push(2);
+        push_u32(&mut bytes, 3);
+        bytes.extend_from_slice(&[9, 8, 7]);
 
+        let parsed = parse_driver_info(frame(InfoKind::ConnectionIpv4, &bytes)).unwrap();
+        let DriverInfo::ConnectionV4(connection) = parsed else {
+            panic!("expected IPv4 connection");
+        };
+
+        assert_eq!(connection.id, 7);
+        assert_eq!(connection.process_id, 42);
+        assert_eq!(connection.direction, 1);
+        assert_eq!(connection.protocol, 6);
+        assert_eq!(connection.local_address, [10, 0, 0, 1]);
+        assert_eq!(connection.remote_address, [1, 1, 1, 1]);
+        assert_eq!(connection.local_port, 1234);
+        assert_eq!(connection.remote_port, 443);
+        assert_eq!(connection.payload_layer, 2);
+        assert_eq!(connection.packet_payload, &[9, 8, 7]);
+        assert!(std::ptr::eq(connection.packet_payload.as_ptr(), bytes[35..].as_ptr()));
+    }
+
+    #[test]
+    fn decodes_ipv6_connection() {
+        let mut bytes = Vec::new();
+        push_u64(&mut bytes, 11);
+        push_u64(&mut bytes, 99);
+        bytes.extend_from_slice(&[0, 17]);
+        bytes.extend_from_slice(&[1; 16]);
+        bytes.extend_from_slice(&[2; 16]);
+        push_u16(&mut bytes, 53);
+        push_u16(&mut bytes, 5353);
+        bytes.push(4);
+        push_u32(&mut bytes, 0);
+
+        let parsed = parse_driver_info(frame(InfoKind::ConnectionIpv6, &bytes)).unwrap();
+        let DriverInfo::ConnectionV6(connection) = parsed else {
+            panic!("expected IPv6 connection");
+        };
+
+        assert_eq!(connection.id, 11);
+        assert_eq!(connection.process_id, 99);
+        assert_eq!(connection.local_address, [1; 16]);
+        assert_eq!(connection.remote_address, [2; 16]);
+        assert_eq!(connection.packet_payload, &[]);
+    }
+
+    #[test]
+    fn decodes_connection_end_events() {
+        let mut v4 = Vec::new();
+        push_u64(&mut v4, 5);
+        v4.extend_from_slice(&[1, 6, 10, 0, 0, 1, 1, 1, 1, 1]);
+        push_u16(&mut v4, 1000);
+        push_u16(&mut v4, 443);
+
+        let parsed = parse_driver_info(frame(InfoKind::ConnectionEndV4, &v4)).unwrap();
+        let DriverInfo::ConnectionEndV4(end) = parsed else {
+            panic!("expected IPv4 connection end");
+        };
+        assert_eq!(end.process_id, 5);
+        assert_eq!(end.local_address, [10, 0, 0, 1]);
+        assert_eq!(end.remote_address, [1, 1, 1, 1]);
+
+        let mut v6 = Vec::new();
+        push_u64(&mut v6, 6);
+        v6.extend_from_slice(&[0, 17]);
+        v6.extend_from_slice(&[3; 16]);
+        v6.extend_from_slice(&[4; 16]);
+        push_u16(&mut v6, 2000);
+        push_u16(&mut v6, 5353);
+
+        let parsed = parse_driver_info(frame(InfoKind::ConnectionEndV6, &v6)).unwrap();
+        let DriverInfo::ConnectionEndV6(end) = parsed else {
+            panic!("expected IPv6 connection end");
+        };
+        assert_eq!(end.process_id, 6);
+        assert_eq!(end.local_address, [3; 16]);
+        assert_eq!(end.remote_address, [4; 16]);
+    }
+
+    #[test]
+    fn decodes_log_line_without_copying_message() {
+        let bytes = [3, b'o', b'k'];
+        let parsed = parse_driver_info(frame(InfoKind::LogLine, &bytes)).unwrap();
+        let DriverInfo::LogLine { severity, message } = parsed else {
+            panic!("expected log line");
+        };
+
+        assert_eq!(severity, 3);
+        assert_eq!(message, b"ok");
+        assert!(std::ptr::eq(message.as_ptr(), bytes[1..].as_ptr()));
+    }
+
+    #[test]
+    fn exposes_bandwidth_records_without_allocating_a_second_record_array() {
+        let mut bytes = Vec::new();
+        bytes.push(6);
+        push_u32(&mut bytes, 1);
+        bytes.extend_from_slice(&[10, 0, 0, 1]);
+        push_u16(&mut bytes, 1234);
+        bytes.extend_from_slice(&[1, 1, 1, 1]);
+        push_u16(&mut bytes, 443);
+        push_u64(&mut bytes, 100);
+        push_u64(&mut bytes, 200);
+
+        let parsed = parse_driver_info(frame(InfoKind::BandwidthStatsV4, &bytes)).unwrap();
+        let DriverInfo::BandwidthV4(stats) = parsed else {
+            panic!("expected IPv4 bandwidth stats");
+        };
+
+        assert_eq!(stats.protocol, 6);
+        assert_eq!(stats.len(), 1);
         assert_eq!(
-            parse_info_frame(&[1, 3, 0, 0, 0, 10], 64).err(),
-            Some(ProtocolError::TruncatedPayload {
-                expected: 3,
-                available: 1,
+            stats.get(0),
+            Some(BandwidthValueV4 {
+                local_address: [10, 0, 0, 1],
+                local_port: 1234,
+                remote_address: [1, 1, 1, 1],
+                remote_port: 443,
+                transmitted_bytes: 100,
+                received_bytes: 200,
             })
         );
+        assert_eq!(stats.get(1), None);
+    }
+
+    #[test]
+    fn decodes_ipv6_bandwidth_records() {
+        let mut bytes = Vec::new();
+        bytes.push(17);
+        push_u32(&mut bytes, 1);
+        bytes.extend_from_slice(&[1; 16]);
+        push_u16(&mut bytes, 5353);
+        bytes.extend_from_slice(&[2; 16]);
+        push_u16(&mut bytes, 443);
+        push_u64(&mut bytes, 300);
+        push_u64(&mut bytes, 400);
+
+        let parsed = parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)).unwrap();
+        let DriverInfo::BandwidthV6(stats) = parsed else {
+            panic!("expected IPv6 bandwidth stats");
+        };
+
+        assert_eq!(stats.protocol, 17);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(
+            stats.get(0),
+            Some(BandwidthValueV6 {
+                local_address: [1; 16],
+                local_port: 5353,
+                remote_address: [2; 16],
+                remote_port: 443,
+                transmitted_bytes: 300,
+                received_bytes: 400,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_and_decodes_a_complete_frame_with_default_limit() {
+        let bytes = [InfoKind::LogLine as u8, 2, 0, 0, 0, 3, b'o'];
+
+        let (parsed, consumed) = parse_driver_info_frame(&bytes).unwrap();
+        let DriverInfo::LogLine { severity, message } = parsed else {
+            panic!("expected log line");
+        };
+
+        assert_eq!(severity, 3);
+        assert_eq!(message, b"o");
+        assert_eq!(consumed, bytes.len());
+    }
+
+    #[test]
+    fn default_frame_parser_rejects_oversized_payloads() {
+        let mut header = [0; 5];
+        header[0] = InfoKind::LogLine as u8;
+        header[1..5].copy_from_slice(&((DEFAULT_MAX_INFO_PAYLOAD as u32) + 1).to_le_bytes());
 
         assert_eq!(
-            parse_info_frame(&[1, 2, 0, 0, 0, 10, 11], 1).err(),
+            parse_driver_info_frame(&header).err(),
             Some(ProtocolError::PayloadTooLarge {
-                length: 2,
-                maximum: 1,
+                length: DEFAULT_MAX_INFO_PAYLOAD + 1,
+                maximum: DEFAULT_MAX_INFO_PAYLOAD,
             })
         );
     }
 
     #[test]
-    fn rejects_unknown_info_types() {
-        assert_eq!(
-            parse_info_frame(&[255, 0, 0, 0, 0], 64).err(),
-            Some(ProtocolError::UnknownInfoType(255))
-        );
+    fn rejects_bandwidth_count_that_exceeds_the_frame() {
+        let bytes = [6, 0xff, 0xff, 0xff, 0xff];
+        assert!(matches!(
+            parse_driver_info(frame(InfoKind::BandwidthStatsV6, &bytes)),
+            Err(ProtocolError::TruncatedPayload { .. }) | Err(ProtocolError::LengthOverflow)
+        ));
     }
 
     #[test]
-    fn encodes_verdict_using_driver_wire_layout() {
-        let command = DriverCommand::Verdict { id: 1, verdict: 2 };
-        assert_eq!(command.encoded_len(), 10);
-        assert_eq!(command.encode().as_slice(), &[1, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
-    }
+    fn rejects_truncated_fixed_fields_and_payload_lengths() {
+        assert!(matches!(
+            parse_driver_info(frame(InfoKind::ConnectionEndV4, &[0; 4])),
+            Err(ProtocolError::TruncatedPayload { .. })
+        ));
 
-    #[test]
-    fn encodes_ipv4_update_in_little_endian_order() {
-        let command = DriverCommand::UpdateV4 {
-            protocol: 6,
-            local_address: [10, 0, 0, 1],
-            local_port: 0x1234,
-            remote_address: [1, 1, 1, 1],
-            remote_port: 443,
-            verdict: 2,
-        };
-        let bytes = command.encode();
+        let mut bytes = Vec::new();
+        push_u64(&mut bytes, 1);
+        push_u64(&mut bytes, 2);
+        bytes.extend_from_slice(&[0, 6]);
+        bytes.extend_from_slice(&[0; 8]);
+        push_u16(&mut bytes, 80);
+        push_u16(&mut bytes, 443);
+        bytes.push(1);
+        push_u32(&mut bytes, 100);
 
-        assert_eq!(bytes.len(), 15);
-        assert_eq!(bytes[0], CommandType::UpdateV4 as u8);
-        assert_eq!(&bytes[6..8], &[0x34, 0x12]);
-        assert_eq!(&bytes[12..14], &[0xbb, 0x01]);
-    }
-
-    #[test]
-    fn encodes_ipv6_update_in_driver_wire_order() {
-        let command = DriverCommand::UpdateV6 {
-            protocol: 17,
-            local_address: [1; 16],
-            local_port: 0x1234,
-            remote_address: [2; 16],
-            remote_port: 0x5678,
-            verdict: 4,
-        };
-        let bytes = command.encode();
-
-        assert_eq!(bytes.len(), 39);
-        assert_eq!(bytes[0], CommandType::UpdateV6 as u8);
-        assert_eq!(bytes[1], 17);
-        assert_eq!(&bytes[18..20], &[0x34, 0x12]);
-        assert_eq!(&bytes[36..38], &[0x78, 0x56]);
-        assert_eq!(bytes[38], 4);
-    }
-
-    #[test]
-    fn encodes_single_byte_control_commands() {
-        let commands = [
-            (DriverCommand::Shutdown, CommandType::Shutdown),
-            (DriverCommand::ClearCache, CommandType::ClearCache),
-            (DriverCommand::GetLogs, CommandType::GetLogs),
-            (
-                DriverCommand::GetBandwidthStats,
-                CommandType::GetBandwidthStats,
-            ),
-            (
-                DriverCommand::PrintMemoryStats,
-                CommandType::PrintMemoryStats,
-            ),
-            (
-                DriverCommand::CleanEndedConnections,
-                CommandType::CleanEndedConnections,
-            ),
-        ];
-
-        for (command, expected) in commands {
-            assert_eq!(command.encoded_len(), 1);
-            assert_eq!(command.encode(), [expected as u8]);
-        }
-    }
-
-    #[test]
-    fn reuses_preallocated_command_buffer() {
-        let command = DriverCommand::UpdateV6 {
-            protocol: 17,
-            local_address: [0; 16],
-            local_port: 53,
-            remote_address: [1; 16],
-            remote_port: 443,
-            verdict: 2,
-        };
-        let mut output = Vec::with_capacity(64);
-        let original_capacity = output.capacity();
-
-        command.encode_into(&mut output);
-
-        assert_eq!(output.len(), command.encoded_len());
-        assert_eq!(output.capacity(), original_capacity);
+        assert!(matches!(
+            parse_driver_info(frame(InfoKind::ConnectionIpv4, &bytes)),
+            Err(ProtocolError::TruncatedPayload { .. })
+        ));
     }
 }
