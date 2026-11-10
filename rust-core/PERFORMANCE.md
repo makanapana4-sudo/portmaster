@@ -117,3 +117,9 @@ This is a synchronous transport primitive, not yet the full Portmaster resolver:
 The Rust core now exposes a synchronous `DnsResolver` that combines the query parser, cache, single-flight coordinator and UDP/TCP upstream client. Fresh cache hits avoid upstream I/O. Near-expiry entries are refreshed; identical cacheable questions share one in-flight fetch; cacheable replies are validated against the original question before insertion; and a previous successful response can be used as a fallback when an upstream fetch fails.
 
 This is still an opt-in library component. It does not open a local DNS listener, identify the requesting process, apply domain/app filtering, choose among multiple upstream providers, or run an async worker pool. No whole-service speed or memory improvement is claimed until it is integrated into Portmaster's actual DNS path and benchmarked.
+
+## Bounded DNS worker service
+
+The synchronous resolver can now be hosted by a fixed-size worker service. Incoming requests enter a bounded channel; callers use non-blocking submission and receive an explicit QueueFull error instead of creating more threads or growing an unbounded queue. The worker and queue count are both capped, and requests larger than the DNS TCP length-prefix limit (65,535 bytes) are rejected before being copied into the queue.
+
+This service is still a library adapter, not a local UDP/TCP listener. A host service must map its listener connections to `try_resolve`, apply appropriate backpressure to clients, and choose worker/queue sizes from measurements.

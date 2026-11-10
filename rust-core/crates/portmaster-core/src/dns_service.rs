@@ -11,7 +11,8 @@ use std::{
 };
 
 const MAX_DNS_WORKERS: usize = 256;
-const MAX_DNS_QUEUE_CAPACITY: usize = 1_000_000;
+const MAX_DNS_QUEUE_CAPACITY: usize = 1_024;
+const MAX_DNS_REQUEST_SIZE: usize = u16::MAX as usize;
 
 struct ResolveJob {
     query: Vec<u8>,
@@ -26,6 +27,7 @@ pub enum DnsServiceError {
     TooManyWorkers,
     ZeroQueueCapacity,
     QueueTooLarge,
+    QueryTooLarge,
     QueueFull,
     Disconnected,
     ThreadSpawn(io::Error),
@@ -43,6 +45,9 @@ impl std::fmt::Display for DnsServiceError {
             }
             Self::QueueTooLarge => {
                 write!(formatter, "DNS service queue capacity exceeds {MAX_DNS_QUEUE_CAPACITY}")
+            }
+            Self::QueryTooLarge => {
+                write!(formatter, "DNS service request exceeds {MAX_DNS_REQUEST_SIZE} bytes")
             }
             Self::QueueFull => formatter.write_str("DNS worker queue is full"),
             Self::Disconnected => formatter.write_str("DNS worker service is disconnected"),
@@ -142,6 +147,10 @@ impl DnsResolverService {
         query: &[u8],
         options: DnsResolveOptions,
     ) -> Result<Receiver<Result<DnsResolveResult, DnsResolverError>>, DnsServiceError> {
+        if query.len() > MAX_DNS_REQUEST_SIZE {
+            return Err(DnsServiceError::QueryTooLarge);
+        }
+
         let sender = self.sender.as_ref().ok_or(DnsServiceError::Disconnected)?;
         let (reply, response) = sync_channel(1);
         let job = ResolveJob {
@@ -196,9 +205,9 @@ mod tests {
         dns_upstream::{DnsUpstreamClient, DnsUpstreamConfig},
     };
     use std::{
-        io::{Read, Write},
         net::UdpSocket,
         sync::mpsc,
+        thread,
         time::Duration,
     };
 
