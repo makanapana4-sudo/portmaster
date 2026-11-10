@@ -7,7 +7,7 @@ The workspace now contains reusable building blocks:
 - validated core resource-limit configuration;
 - a fixed-capacity TTL cache;
 - a bounded multi-producer, single-consumer event queue;
-- safe framing, typed decoding, and command encoding for the existing Windows driver protocol;
+- safe framing, typed decoding of all seven driver event kinds, and command encoding for the existing Windows driver protocol;
 - shared error types.
 
 These components are not yet connected to the running Portmaster service. The existing Go implementation remains authoritative and must not be removed or bypassed until migrated features demonstrate behavior parity, security equivalence, and measured performance improvements.
@@ -69,7 +69,7 @@ cargo clippy --manifest-path rust-core/Cargo.toml --workspace --all-targets -- -
 cargo test --manifest-path rust-core/Cargo.toml --workspace
 ```
 
-GitHub Actions runs these checks on Linux and Windows when Rust core files change. The existing WFP kernel driver has its own separate build workflow and is not built by this core workflow.
+GitHub Actions runs these checks on Linux and Windows when Rust core or shared protocol files change. The workflow also runs the existing `windows_kext/protocol` crate tests so the reused message IDs and wire types stay covered. The existing WFP kernel driver has its own separate build workflow and is not built by this core workflow.
 
 ## Performance
 
