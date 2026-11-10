@@ -11,6 +11,7 @@ on:
       - main
     paths:
       - 'rust-core/**'
+      - 'windows_kext/protocol/**'
       - '.github/workflows/rust-core.yml'
   pull_request:
     branches:
@@ -41,6 +42,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Test shared Windows driver protocol
+        run: cargo test --manifest-path windows_kext/protocol/Cargo.toml
 
       - name: Check formatting
         run: cargo fmt --manifest-path rust-core/Cargo.toml --all -- --check
