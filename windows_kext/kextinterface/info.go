@@ -384,109 +384,113 @@ func RecvInfo(reader io.Reader) (*Info, error) {
 
 	switch helper.infoType {
 	case InfoConnectionIpv4:
-		parseError := fmt.Errorf("failed to parse InfoConnectionIpv4")
 		newInfo := ConnectionV4{}
-		var fixedSizeValues connectionV4Internal
-		if err = helper.ReadData(&fixedSizeValues); err != nil {
-			return nil, errors.Join(parseError, err, fmt.Errorf("fixed"))
+		fixedSizeValues, readErr := helper.readConnectionV4()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionIpv4 fixed fields: %w", readErr)
 		}
 		newInfo.connectionV4Internal = fixedSizeValues
 
-		var payloadSize uint32
-		if err = helper.ReadData(&payloadSize); err != nil {
-			return nil, errors.Join(parseError, err, fmt.Errorf("payloadsize"))
+		payloadSize, readErr := helper.ReadUint32()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionIpv4 payload size: %w", readErr)
 		}
 		if payloadSize > 0 {
-			newInfo.Payload, err = helper.ReadBytes(payloadSize)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse InfoConnectionIpv4 payload: %w", err)
+			newInfo.Payload, readErr = helper.ReadBytes(payloadSize)
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to parse InfoConnectionIpv4 payload: %w", readErr)
 			}
 		}
 		return &Info{ConnectionV4: &newInfo}, nil
 
 	case InfoConnectionIpv6:
-		parseError := fmt.Errorf("failed to parse InfoConnectionIpv6")
 		newInfo := ConnectionV6{}
-		if err = helper.ReadData(&newInfo.connectionV6Internal); err != nil {
-			return nil, errors.Join(parseError, err)
+		fixedSizeValues, readErr := helper.readConnectionV6()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionIpv6 fixed fields: %w", readErr)
 		}
+		newInfo.connectionV6Internal = fixedSizeValues
 
-		var payloadSize uint32
-		if err = helper.ReadData(&payloadSize); err != nil {
-			return nil, errors.Join(parseError, err)
+		payloadSize, readErr := helper.ReadUint32()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionIpv6 payload size: %w", readErr)
 		}
 		if payloadSize > 0 {
-			newInfo.Payload, err = helper.ReadBytes(payloadSize)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse InfoConnectionIpv6 payload: %w", err)
+			newInfo.Payload, readErr = helper.ReadBytes(payloadSize)
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to parse InfoConnectionIpv6 payload: %w", readErr)
 			}
 		}
 		return &Info{ConnectionV6: &newInfo}, nil
 
 	case InfoConnectionEndEventV4:
-		var connectionEnd ConnectionEndV4
-		if err = helper.ReadData(&connectionEnd); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoConnectionEndEventV4"), err)
+		connectionEnd, readErr := helper.readConnectionEndV4()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionEndEventV4: %w", readErr)
 		}
 		return &Info{ConnectionEndV4: &connectionEnd}, nil
 
 	case InfoConnectionEndEventV6:
-		var connectionEnd ConnectionEndV6
-		if err = helper.ReadData(&connectionEnd); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoConnectionEndEventV6"), err)
+		connectionEnd, readErr := helper.readConnectionEndV6()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoConnectionEndEventV6: %w", readErr)
 		}
 		return &Info{ConnectionEndV6: &connectionEnd}, nil
 
 	case InfoLogLine:
-		logLine := LogLine{}
-		if err = helper.ReadData(&logLine.Severity); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoLogLine"), err)
+		severity, readErr := helper.ReadUint8()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoLogLine severity: %w", readErr)
 		}
 		line, readErr := helper.ReadBytes(0)
 		if readErr != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoLogLine"), readErr)
+			return nil, fmt.Errorf("failed to parse InfoLogLine message: %w", readErr)
 		}
-		logLine.Line = string(line)
-		return &Info{LogLine: &logLine}, nil
+		return &Info{LogLine: &LogLine{
+			Severity: severity,
+			Line:     string(line),
+		}}, nil
 
 	case InfoBandwidthStatsV4:
-		var protocol uint8
-		if err = helper.ReadData(&protocol); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV4"), err)
+		protocol, readErr := helper.ReadUint8()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 protocol: %w", readErr)
 		}
-		var size uint32
-		if err = helper.ReadData(&size); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV4"), err)
+		size, readErr := helper.ReadUint32()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 count: %w", readErr)
 		}
-		if err = helper.validateArrayCount(size, bandwidthValueV4Size); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV4"), err)
+		if readErr = helper.validateArrayCount(size, bandwidthValueV4Size); readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 count: %w", readErr)
 		}
 
 		statsArray := make([]BandwidthValueV4, int(size))
 		for i := range statsArray {
-			if err = helper.ReadData(&statsArray[i]); err != nil {
-				return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV4"), err)
+			statsArray[i], readErr = helper.readBandwidthValueV4()
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV4 record %d: %w", i, readErr)
 			}
 		}
 		return &Info{BandwidthStats: &BandwidthStatsArray{Protocol: protocol, ValuesV4: statsArray}}, nil
 
 	case InfoBandwidthStatsV6:
-		var protocol uint8
-		if err = helper.ReadData(&protocol); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV6"), err)
+		protocol, readErr := helper.ReadUint8()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 protocol: %w", readErr)
 		}
-		var size uint32
-		if err = helper.ReadData(&size); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV6"), err)
+		size, readErr := helper.ReadUint32()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 count: %w", readErr)
 		}
-		if err = helper.validateArrayCount(size, bandwidthValueV6Size); err != nil {
-			return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV6"), err)
+		if readErr = helper.validateArrayCount(size, bandwidthValueV6Size); readErr != nil {
+			return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 count: %w", readErr)
 		}
 
 		statsArray := make([]BandwidthValueV6, int(size))
 		for i := range statsArray {
-			if err = helper.ReadData(&statsArray[i]); err != nil {
-				return nil, errors.Join(fmt.Errorf("failed to parse InfoBandwidthStatsV6"), err)
+			statsArray[i], readErr = helper.readBandwidthValueV6()
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to parse InfoBandwidthStatsV6 record %d: %w", i, readErr)
 			}
 		}
 		return &Info{BandwidthStats: &BandwidthStatsArray{Protocol: protocol, ValuesV6: statsArray}}, nil
