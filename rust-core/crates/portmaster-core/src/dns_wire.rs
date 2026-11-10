@@ -20,6 +20,12 @@ pub enum DnsWireError {
     CompressionLimitExceeded,
     NameTooLong,
     LengthOverflow,
+    QueryIsResponse,
+    ResponseNotMarked,
+    TransactionIdMismatch,
+    OpcodeMismatch,
+    QuestionMismatch,
+    InvalidQuestionCount,
 }
 
 impl std::fmt::Display for DnsWireError {
@@ -39,6 +45,12 @@ impl std::fmt::Display for DnsWireError {
             }
             Self::NameTooLong => formatter.write_str("DNS name exceeds 255 wire bytes"),
             Self::LengthOverflow => formatter.write_str("DNS record length overflowed"),
+            Self::QueryIsResponse => formatter.write_str("DNS request is marked as a response"),
+            Self::ResponseNotMarked => formatter.write_str("DNS response is not marked as a response"),
+            Self::TransactionIdMismatch => formatter.write_str("DNS response transaction ID does not match the request"),
+            Self::OpcodeMismatch => formatter.write_str("DNS response opcode does not match the request"),
+            Self::QuestionMismatch => formatter.write_str("DNS response question does not match the request"),
+            Self::InvalidQuestionCount => formatter.write_str("DNS request and response must each contain one question"),
         }
     }
 }
@@ -173,6 +185,40 @@ pub fn parse_dns_message(packet: &[u8]) -> Result<DnsMessageMetadata, DnsWireErr
         first_question,
         minimum_record_ttl_secs,
     })
+}
+
+/// Validates an upstream DNS response against the original query.
+///
+/// Transaction ID, QR/response bit, opcode, question name, question type and
+/// question class must all match. Names are compared after the parser's
+/// case-insensitive normalization.
+pub fn validate_dns_response(
+    query_packet: &[u8],
+    response_packet: &[u8],
+) -> Result<DnsMessageMetadata, DnsWireError> {
+    let query = parse_dns_message(query_packet)?;
+    let response = parse_dns_message(response_packet)?;
+
+    if query.is_response() {
+        return Err(DnsWireError::QueryIsResponse);
+    }
+    if !response.is_response() {
+        return Err(DnsWireError::ResponseNotMarked);
+    }
+    if query.id != response.id {
+        return Err(DnsWireError::TransactionIdMismatch);
+    }
+    if query.flags & 0x7800 != response.flags & 0x7800 {
+        return Err(DnsWireError::OpcodeMismatch);
+    }
+    if query.question_count != 1 || response.question_count != 1 {
+        return Err(DnsWireError::InvalidQuestionCount);
+    }
+    if query.first_question != response.first_question {
+        return Err(DnsWireError::QuestionMismatch);
+    }
+
+    Ok(response)
 }
 
 /// Rewrites every answer, authority and additional record TTL in-place.
@@ -427,6 +473,64 @@ mod tests {
         let cache_metadata = metadata.cache_metadata(false, true);
         assert_eq!(cache_metadata.answer_count, 1);
         assert_eq!(cache_metadata.minimum_record_ttl_secs, Some(15));
+    }
+
+    fn example_query() -> Vec<u8> {
+        let mut packet = example_message();
+        packet[2] = 0x01;
+        packet[3] = 0x00;
+        packet[6..12].fill(0);
+        packet.truncate(12 + 13 + 4);
+        packet
+    }
+
+    #[test]
+    fn validates_response_id_opcode_and_question() {
+        let query = example_query();
+        let response = example_message();
+
+        let metadata = validate_dns_response(&query, &response).unwrap();
+        assert_eq!(metadata.id, 0x1234);
+        assert!(metadata.is_response());
+
+        let mut wrong_id = response.clone();
+        wrong_id[0] ^= 0xff;
+        assert_eq!(
+            validate_dns_response(&query, &wrong_id).err(),
+            Some(DnsWireError::TransactionIdMismatch)
+        );
+
+        let mut wrong_name = response.clone();
+        wrong_name[13] = b'x';
+        assert_eq!(
+            validate_dns_response(&query, &wrong_name).err(),
+            Some(DnsWireError::QuestionMismatch)
+        );
+
+        let mut wrong_opcode = response.clone();
+        wrong_opcode[2] ^= 0x08;
+        assert_eq!(
+            validate_dns_response(&query, &wrong_opcode).err(),
+            Some(DnsWireError::OpcodeMismatch)
+        );
+
+        let mut response_not_marked = response;
+        response_not_marked[2] &= !0x80;
+        assert_eq!(
+            validate_dns_response(&query, &response_not_marked).err(),
+            Some(DnsWireError::ResponseNotMarked)
+        );
+    }
+
+    #[test]
+    fn rejects_request_marked_as_response() {
+        let mut query = example_query();
+        query[2] |= 0x80;
+
+        assert_eq!(
+            validate_dns_response(&query, &example_message()).err(),
+            Some(DnsWireError::QueryIsResponse)
+        );
     }
 
     #[test]

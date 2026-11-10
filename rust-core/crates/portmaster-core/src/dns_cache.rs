@@ -1,4 +1,6 @@
-use crate::dns_wire::{parse_dns_message, rewrite_resource_record_ttls, DnsWireError};
+use crate::dns_wire::{
+    parse_dns_message, rewrite_resource_record_ttls, validate_dns_response, DnsWireError,
+};
 use std::collections::{HashMap, VecDeque};
 
 const MAX_CACHE_CAPACITY: usize = 1_000_000;
@@ -362,6 +364,49 @@ impl DnsCache {
         now_unix: u64,
     ) -> Result<bool, DnsWireCacheError> {
         let metadata = parse_dns_message(&payload)?;
+        self.insert_parsed_dns_response(
+            payload,
+            metadata,
+            is_connectivity_domain,
+            online,
+            no_caching,
+            now_unix,
+        )
+    }
+
+    /// Validates and caches a response in the context of its original query.
+    ///
+    /// The response cannot be cached under a different transaction ID,
+    /// question name, record type or class.
+    pub fn insert_dns_response_for_query(
+        &mut self,
+        query_packet: &[u8],
+        response_packet: Vec<u8>,
+        is_connectivity_domain: bool,
+        online: bool,
+        no_caching: bool,
+        now_unix: u64,
+    ) -> Result<bool, DnsWireCacheError> {
+        let metadata = validate_dns_response(query_packet, &response_packet)?;
+        self.insert_parsed_dns_response(
+            response_packet,
+            metadata,
+            is_connectivity_domain,
+            online,
+            no_caching,
+            now_unix,
+        )
+    }
+
+    fn insert_parsed_dns_response(
+        &mut self,
+        payload: Vec<u8>,
+        metadata: crate::dns_wire::DnsMessageMetadata,
+        is_connectivity_domain: bool,
+        online: bool,
+        no_caching: bool,
+        now_unix: u64,
+    ) -> Result<bool, DnsWireCacheError> {
         if !metadata.is_response() {
             return Err(DnsWireCacheError::NotAResponse);
         }

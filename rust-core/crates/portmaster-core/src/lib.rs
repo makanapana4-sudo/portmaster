@@ -29,8 +29,8 @@ pub use dns_cache::{
     DNS_RCODE_REFUSED, DNS_RCODE_SUCCESS,
 };
 pub use dns_wire::{
-    parse_dns_message, rewrite_resource_record_ttls, DnsMessageMetadata, DnsQuestion,
-    DnsWireError, DNS_HEADER_SIZE,
+    parse_dns_message, rewrite_resource_record_ttls, validate_dns_response, DnsMessageMetadata,
+    DnsQuestion, DnsWireError, DNS_HEADER_SIZE,
 };
 pub use driver_info::{
     parse_driver_info, parse_driver_info_frame, BandwidthStatsV4, BandwidthStatsV6,

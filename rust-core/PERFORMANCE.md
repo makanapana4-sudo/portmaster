@@ -101,3 +101,5 @@ The DNS cache can now ingest a raw wire response through a validated single-ques
 Client responses can be prepared by cloning the cached bytes once and rewriting every resource-record TTL in place to the configured client TTL (17 seconds by default). The cached source bytes remain unchanged. Truncated or non-response packets are rejected before cache insertion.
 
 This still does not implement upstream resolver selection, UDP/TCP/DoH/DoT sockets, DNSSEC validation, query compliance, or filtering. Those need their own behavior-parity tests before the new parser is used in live traffic.
+
+The raw-response insertion path also has a query-bound variant. Before caching, it verifies the response bit, transaction ID, opcode, and normalized question name/type/class against the original request. This is intended to prevent an upstream mismatch from populating the cache under the wrong question; upstream transport authentication and DNSSEC validation remain separate layers.
